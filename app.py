@@ -8,24 +8,55 @@ st.set_page_config(page_title="Gestion Menuiserie", layout="wide")
 st.sidebar.title("🛠️ Menu Principal")
 menu = st.sidebar.radio(
     "Accéder à :",
-    ["📊 Rentabilité & Planning", "💰 Trésorerie & Engagements", "📦 Stock & QR Codes"]
+    ["📊 Rentabilité & Planning", "📝 Pense-bête Chantiers", "💰 Trésorerie & Engagements", "📦 Stock & QR Codes"]
 )
+
+# Liste des chantiers réels de ton Kimai
+LISTE_CHANTIERS = [
+    "26/227 Réfection plan de travail - Cornachon",
+    "26/221 Fabrication et pose étagères - Givre",
+    "25/169 Fourniture et pose bloc portes - Mercier / Malinvaud",
+    "25/19 Fabrication étagères et passe plat - Norma",
+    "25/20 Pose cuisine Joubert - Ambiance Intérieur",
+    "OE 25/180 Fabrication et pose placard - Murgier",
+    "OE 25/00 Travail de bureau - Agencement Bois Création",
+    "OE 25/01 Aménagement Atelier - Agencement Bois Création",
+    "OE 24/112 Fabrication et pose façade meuble - Murgier",
+    "OE 24/86 Fabrication meuble de chambre - Murgier",
+    "OE 24/94 Porte d'entrée - Guerraz"
+]
+
+LISTE_TACHES = [
+    "M1 - Montage atelier", 
+    "D2 - Débit bois", 
+    "P1 - Pose chantier", 
+    "X5 - Bureau / Administration",
+    "X8 - Devis & Métrés"
+]
 
 # Initialisation des bases de données en mémoire (session)
 if 'historique_heures' not in st.session_state:
     st.session_state['historique_heures'] = []
 
+if 'pense_bete' not in st.session_state:
+    st.session_state['pense_bete'] = {
+        "26/221 Fabrication et pose étagères - Givre": "Penser aux taquets invisibles + livraison coulisses Movento.",
+        "25/169 Fourniture et pose bloc portes - Mercier / Malinvaud": "Vérifier la hauteur sous linteau avant la pose du bloc porte."
+    }
+
 if 'mouvements_treso' not in st.session_state:
     st.session_state['mouvements_treso'] = [
-        {"Date": "2026-09-15", "Libellé": "Acompte Cuisine Dupont", "Type": "Encaissement", "Montant HT": 3500.0, "Statut": "Réalisé"},
-        {"Date": "2026-09-18", "Libellé": "Commande Quincaillerie Foussier", "Type": "Engagement Dépense", "Montant HT": 480.0, "Statut": "Engagé"}
+        {"Date": "2026-09-15", "Libellé": "Acompte Cuisine Joubert", "Type": "Encaissement", "Montant HT": 3500.0, "Statut": "Réalisé / Encaissé"},
+        {"Date": "2026-09-18", "Libellé": "Commande Quincaillerie Foussier", "Type": "Engagement Dépense", "Montant HT": 480.0, "Statut": "Engagé / En attente"}
     ]
 
 if 'stock_articles' not in st.session_state:
     st.session_state['stock_articles'] = [
-        {"Réf": "FOUS-283222", "Désignation": "Charnière Blum 110° Applique", "Fournisseur": "Foussier", "Quantité": 45, "Seuil Min": 10, "Prix HT": 3.20},
-        {"Réf": "FOUS-241138", "Désignation": "Coulisse Movento 500mm", "Fournisseur": "Foussier", "Quantité": 8, "Seuil Min": 12, "Prix HT": 24.50},
-        {"Réf": "WURTH-102345", "Désignation": "Vis Bois 3.5x30 (Boîte de 500)", "Fournisseur": "Würth", "Quantité": 3, "Seuil Min": 2, "Prix HT": 18.90}
+        {"Réf": "VIS-3x10", "Désignation": "VIS 3x10", "Quantité": 50, "Unité": "centaine", "Prix unitaire": 0.99},
+        {"Réf": "VIS-3x16", "Désignation": "VIS 3x16", "Quantité": 100, "Unité": "centaine", "Prix unitaire": 1.05},
+        {"Réf": "VIS-3.5x30", "Désignation": "VIS 3,5X30", "Quantité": 50, "Unité": "centaine", "Prix unitaire": 1.23},
+        {"Réf": "CHARN-BLUM", "Désignation": "Charnières Blum 110° Applique", "Quantité": 40, "Unité": "pc", "Prix unitaire": 3.20},
+        {"Réf": "COUL-MOV-500", "Désignation": "Coulisses Movento 500mm", "Quantité": 6, "Unité": "paire", "Prix unitaire": 24.50}
     ]
 
 # ==============================================================================
@@ -34,24 +65,18 @@ if 'stock_articles' not in st.session_state:
 if menu == "📊 Rentabilité & Planning":
     st.title("🔨 Saisie des Heures & Rentabilité")
 
-    # Barre latérale pour la saisie rapide
     st.sidebar.header("⏱️ Saisie Rapide")
     with st.sidebar.form("form_heures"):
         date_saisie = st.date_input("Date", datetime.today())
-        chantier = st.text_input("Chantier / Devis", value="2026-DEV-018 Cuisine Dupont")
-        code_tache = st.selectbox("Code Tâche (Kimai)", [
-            "M1 - Montage atelier", 
-            "D2 - Débit bois", 
-            "P1 - Pose chantier", 
-            "X8 - Administration / Devis"
-        ])
+        chantier = st.selectbox("Chantier / Projet", LISTE_CHANTIERS)
+        code_tache = st.selectbox("Code Tâche (Kimai)", LISTE_TACHES)
         heures = st.number_input("Nombre d'heures", min_value=0.5, max_value=12.0, value=7.5, step=0.5)
         valider = st.form_submit_button("Enregistrer les heures")
 
     if valider:
         est_prod = not code_tache.startswith("X")
         st.session_state['historique_heures'].append({
-            "Date": date_saisie,
+            "Date": str(date_saisie),
             "Chantier": chantier,
             "Code": code_tache,
             "Heures": heures,
@@ -59,7 +84,6 @@ if menu == "📊 Rentabilité & Planning":
         })
         st.sidebar.success("Heures enregistrées !")
 
-    # Calculs de rentabilité
     df_heures = pd.DataFrame(st.session_state['historique_heures'])
     heures_prod = df_heures[df_heures['Production'] == True]['Heures'].sum() if not df_heures.empty else 0.0
     
@@ -81,32 +105,33 @@ if menu == "📊 Rentabilité & Planning":
 
     st.progress(progression)
 
-    st.header("📅 Planning de la Semaine")
-    col_mar, col_mer, col_jeu, col_ven = st.columns(4)
-    with col_mar:
-        st.subheader("Mardi")
-        st.info("7,5 h — Débit / Usinage\n\n*Cuisine Dupont*")
-    with col_mer:
-        st.subheader("Mercredi")
-        st.info("7,5 h — Montage Atelier\n\n*Cuisine Dupont*")
-    with col_jeu:
-        st.subheader("Jeudi")
-        st.info("7,5 h — Pose Chantier\n\n*Placard Martin*")
-    with col_ven:
-        st.subheader("Vendredi")
-        st.info("5,5 h — Pose & Finitions\n\n*Placard Martin*")
-
     if not df_heures.empty:
-        st.subheader("📋 Historique des saisies de la semaine")
+        st.subheader("📋 Saisies de la semaine")
         st.dataframe(df_heures, use_container_width=True)
 
 # ==============================================================================
-# MODULE 2 : TRÉSORERIE & ENGAGEMENTS
+# MODULE 2 : PENSE-BÊTE CHANTIERS
+# ==============================================================================
+elif menu == "📝 Pense-bête Chantiers":
+    st.title("📝 Pense-bête & Mémos par Chantier")
+    
+    chantier_sel = st.selectbox("Sélectionner un chantier", LISTE_CHANTIERS)
+    
+    note_actuelle = st.session_state['pense_bete'].get(chantier_sel, "")
+    
+    st.subheader(f"Notes pour : {chantier_sel}")
+    nouvelle_note = st.text_area("Rédiger ou modifier les remarques / quincaillerie à prévoir :", value=note_actuelle, height=150)
+    
+    if st.button("💾 Enregistrer la note"):
+        st.session_state['pense_bete'][chantier_sel] = nouvelle_note
+        st.success("Pense-bête mis à jour avec succès !")
+
+# ==============================================================================
+# MODULE 3 : TRÉSORERIE & ENGAGEMENTS
 # ==============================================================================
 elif menu == "💰 Trésorerie & Engagements":
     st.title("💰 Suivi de Trésorerie & Engagements")
 
-    # Formulaire d'ajout
     st.sidebar.header("➕ Nouveau Mouvement")
     with st.sidebar.form("form_treso"):
         date_treso = st.date_input("Date", datetime.today())
@@ -126,7 +151,6 @@ elif menu == "💰 Trésorerie & Engagements":
         })
         st.sidebar.success("Mouvement enregistré !")
 
-    # Calculs Synthèse
     df_treso = pd.DataFrame(st.session_state['mouvements_treso'])
     
     total_encaisse = df_treso[(df_treso['Type'] == 'Encaissement') & (df_treso['Statut'] == 'Réalisé / Encaissé')]['Montant HT'].sum()
@@ -138,32 +162,14 @@ elif menu == "💰 Trésorerie & Engagements":
     c2.metric("Engagements Dépenses (Stocks/Achats)", f"{total_engag_depenses:,.2f} € HT".replace(",", " "))
     c3.metric("Solde Prévisionnel Net", f"{solde_previsionnel:,.2f} € HT".replace(",", " "))
 
-    st.header("📋 Historique des Mouvements de Trésorerie")
+    st.header("📋 Historique des Mouvements")
     st.dataframe(df_treso, use_container_width=True)
 
 # ==============================================================================
-# MODULE 3 : STOCK & QR CODES
+# MODULE 4 : STOCK & QR CODES
 # ==============================================================================
 elif menu == "📦 Stock & QR Codes":
-    st.title("📦 Gestion des Stocks & Scanner")
+    st.title("📦 Gestion des Stocks & Quincaillerie")
 
     df_stock = pd.DataFrame(st.session_state['stock_articles'])
-
-    # Alertes Réapprovisionnement
-    stock_bas = df_stock[df_stock['Quantité'] <= df_stock['Seuil Min']]
-    if not stock_bas.empty:
-        st.warning(f"⚠️ **{len(stock_bas)} référence(s) sous le seuil minimum !** Réapprovisionnement nécessaire.")
-
-    st.header("📋 État du Stock")
     st.dataframe(df_stock, use_container_width=True)
-
-    st.header("📷 Saisie / Ajustement de Stock")
-    ref_select = st.selectbox("Sélectionner une référence", df_stock['Réf'] + " - " + df_stock['Désignation'])
-    col_plus, col_moins = st.columns(2)
-    
-    with col_plus:
-        if st.button("➕ Ajouter au stock (+1)"):
-            st.success("Stock mis à jour !")
-    with col_moins:
-        if st.button("➖ Retirer du stock (-1)"):
-            st.info("Stock mis à jour !")
