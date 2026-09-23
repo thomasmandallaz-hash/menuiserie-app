@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import io
 
@@ -51,6 +51,7 @@ st.sidebar.title("🛠️ Menu Principal")
 menu = st.sidebar.radio(
     "Accéder à :",
     [
+        "📅 Lundi Administratif & Devis",
         "📊 Rentabilité & Planning", 
         "🧮 Brouillon Devis & Marges",
         "📝 Pense-bête Chantiers", 
@@ -76,7 +77,34 @@ if 'remises_cheques' not in st.session_state:
 if 'stock_articles' not in st.session_state:
     st.session_state['stock_articles'] = df_stock_base.to_dict('records')
 
-# FONCTION GENERATION PDF (Format Avery 21/feuille : 33,5 mm × 38,1 mm)
+if 'taches_lundi' not in st.session_state:
+    st.session_state['taches_lundi'] = [
+        {"Tâche / Devis": "Relance devis en attente", "Echéance": str(datetime.today().date()), "Fait": False},
+        {"Tâche / Devis": "Métré & Rédaction devis cuisine", "Echéance": str(datetime.today().date()), "Fait": False},
+        {"Tâche / Devis": "Facturation chantiers terminés", "Echéance": str(datetime.today().date()), "Fait": False}
+    ]
+
+# Modèles par défaut pour le brouillon devis
+if 'devis_fournitures' not in st.session_state:
+    st.session_state['devis_fournitures'] = pd.DataFrame([
+        {"Désignation": "Panneaux de caissons", "Quantité": 0.0, "Unité": "m²", "Prix d'achat HT": 7.80, "Prix de vente HT": 12.48},
+        {"Désignation": "Panneaux de façade", "Quantité": 0.0, "Unité": "m²", "Prix d'achat HT": 15.00, "Prix de vente HT": 24.00},
+        {"Désignation": "Panneau de fond", "Quantité": 0.0, "Unité": "m²", "Prix d'achat HT": 8.80, "Prix de vente HT": 14.08},
+        {"Désignation": "Rouleau de chant", "Quantité": 0.0, "Unité": "ml", "Prix d'achat HT": 0.65, "Prix de vente HT": 1.04},
+        {"Désignation": "Charnières + embases", "Quantité": 0.0, "Unité": "U", "Prix d'achat HT": 5.00, "Prix de vente HT": 8.00},
+        {"Désignation": "Tiroirs (forfait)", "Quantité": 0.0, "Unité": "U", "Prix d'achat HT": 170.00, "Prix de vente HT": 187.00}
+    ])
+
+if 'devis_mo' not in st.session_state:
+    st.session_state['devis_mo'] = pd.DataFrame([
+        {"Poste / Tâche": "Heures Étude & Devis (X8)", "Heures": 0.0, "Taux Horaire Vente (€/h)": 70.0},
+        {"Poste / Tâche": "Heures Fabrication Atelier (M1/D2)", "Heures": 0.0, "Taux Horaire Vente (€/h)": 75.0},
+        {"Poste / Tâche": "Heures Pose Chantier (P1)", "Heures": 0.0, "Taux Horaire Vente (€/h)": 75.0},
+        {"Poste / Tâche": "Heures Chargement / Préparation", "Heures": 0.0, "Taux Horaire Vente (€/h)": 75.0},
+        {"Poste / Tâche": "Heures Déplacement Pose", "Heures": 0.0, "Taux Horaire Vente (€/h)": 75.0}
+    ])
+
+# FONCTION GENERATION PDF
 def generer_pdf_etiquettes(df):
     buffer = io.BytesIO()
     p = canvas.Canvas(buffer, pagesize=A4)
@@ -106,13 +134,11 @@ def generer_pdf_etiquettes(df):
         x = margin_x + (col * w_label)
         y = height - (margin_y + (r + 1) * h_label)
 
-        # Correction : extraction de l'image au format PIL
         qr = qrcode.QRCode(box_size=10, border=1)
         qr.add_data(str(row['Réf']))
         qr.make(fit=True)
         img_qr = qr.make_image(fill_color="black", back_color="white").get_image()
         
-        # Dessin direct de l'image PIL
         p.drawInlineImage(img_qr, x + 2*mm, y + 2*mm, width=15*mm, height=15*mm)
 
         designation = str(row['Désignation'])
@@ -131,9 +157,63 @@ def generer_pdf_etiquettes(df):
     return buffer
 
 # ==============================================================================
+# MODULE 0 : LUNDI ADMINISTRATIF & DEVIS
+# ==============================================================================
+if menu == "📅 Lundi Administratif & Devis":
+    st.title("📅 Lundi Administratif — Devis & Tâches")
+    st.info("Espace dédié à la journée du lundi : suivi des devis à effectuer, relances et tâches administratives. Les tâches non réalisées se répercutent sur le lundi suivant.")
+
+    col_saisie, col_actions = st.columns([2, 1])
+
+    with col_saisie:
+        st.subheader("➕ Ajouter une tâche / un devis à réaliser")
+        with st.form("form_lundi"):
+            nouvelle_tache = st.text_input("Tâche ou Devis à traiter")
+            date_ech = st.date_input("Échéance", datetime.today())
+            if st.form_submit_button("Ajouter à la liste"):
+                if nouvelle_tache:
+                    st.session_state['taches_lundi'].append({
+                        "Tâche / Devis": nouvelle_tache,
+                        "Echéance": str(date_ech),
+                        "Fait": False
+                    })
+                    st.success("Tâche ajoutée !")
+
+    with col_actions:
+        st.subheader("🔄 Report Automatique")
+        if st.button("Reporter les tâches non cochées au lundi suivant"):
+            prochain_lundi = datetime.today() + timedelta(days=(7 - datetime.today().weekday()))
+            count = 0
+            for item in st.session_state['taches_lundi']:
+                if not item['Fait']:
+                    item['Echéance'] = str(prochain_lundi.date())
+                    count += 1
+            st.success(f"{count} tâche(s) reportée(s) au {prochain_lundi.strftime('%d/%m/%Y')} !")
+
+    st.markdown("---")
+    st.subheader("📋 Liste des travaux administratifs du lundi")
+
+    df_lundi = pd.DataFrame(st.session_state['taches_lundi'])
+    if not df_lundi.empty:
+        edited_df = st.data_editor(
+            df_lundi,
+            column_config={
+                "Fait": st.column_config.CheckboxColumn("Statut", default=False),
+                "Tâche / Devis": st.column_config.TextColumn("Description", width="large"),
+                "Echéance": st.column_config.DateColumn("Date Échéance")
+            },
+            disabled=["Echéance"],
+            num_rows="dynamic",
+            use_container_width=True
+        )
+        st.session_state['taches_lundi'] = edited_df.to_dict('records')
+    else:
+        st.write("Aucune tâche en cours.")
+
+# ==============================================================================
 # MODULE 1 : RENTABILITÉ & PLANNING
 # ==============================================================================
-if menu == "📊 Rentabilité & Planning":
+elif menu == "📊 Rentabilité & Planning":
     st.title("🔨 Saisie des Heures & Rentabilité")
 
     st.sidebar.header("⏱️ Saisie Rapide")
@@ -180,44 +260,44 @@ if menu == "📊 Rentabilité & Planning":
         st.dataframe(df_heures, use_container_width=True)
 
 # ==============================================================================
-# MODULE 2 : BROUILLON DEVIS & MARGES
+# MODULE 2 : BROUILLON DEVIS & MARGES (DYNAMIQUE)
 # ==============================================================================
 elif menu == "🧮 Brouillon Devis & Marges":
     st.title("🧮 Brouillon de Devis & Calculateur de Marges")
-    st.info("Ce calculateur reproduit la trame de votre fichier Excel 00 DEVIS.xlsx pour chiffrer vos fournitures et heures.")
+    st.info("Vous pouvez ajouter, supprimer ou modifier directement toutes les lignes de fournitures et de main-d'œuvre dans les tableaux ci-dessous.")
 
-    st.subheader("1. Fournitures & Matériaux")
-    col_mat1, col_mat2 = st.columns(2)
-    
-    with col_mat1:
-        m2_caissons = st.number_input("M² Panneaux de caissons", value=0.0, step=1.0)
-        m2_facades = st.number_input("M² Panneaux de façade", value=0.0, step=1.0)
-        m2_fond = st.number_input("M² Panneau de fond", value=0.0, step=1.0)
-        ml_chant = st.number_input("Ml Rouleau de chant", value=0.0, step=1.0)
+    st.subheader("1. Fournitures & Matériaux (Modifiable)")
+    df_fourn_edited = st.data_editor(
+        st.session_state['devis_fournitures'],
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "Quantité": st.column_config.NumberColumn(min_value=0.0, step=1.0),
+            "Prix d'achat HT": st.column_config.NumberColumn(format="%.2f €"),
+            "Prix de vente HT": st.column_config.NumberColumn(format="%.2f €")
+        }
+    )
+    st.session_state['devis_fournitures'] = df_fourn_edited
 
-    with col_mat2:
-        nb_charnieres = st.number_input("Nb Charnières + embases", value=0, step=1)
-        nb_tiroirs = st.number_input("Nb Tiroirs (forfait)", value=0, step=1)
-        forfait_materiel = st.number_input("Fourniture matériels divers (€)", value=0.0, step=10.0)
+    achats_mat = (df_fourn_edited["Quantité"] * df_fourn_edited["Prix d'achat HT"]).sum()
+    ventes_mat = (df_fourn_edited["Quantité"] * df_fourn_edited["Prix de vente HT"]).sum()
 
-    achats_mat = (m2_caissons * 7.80) + (m2_facades * 15.00) + (m2_fond * 8.80) + (ml_chant * 0.65) + (nb_charnieres * 5.00) + (nb_tiroirs * 170.00) + forfait_materiel
-    ventes_mat = (m2_caissons * 12.48) + (m2_facades * 24.00) + (m2_fond * 14.08) + (ml_chant * 1.04) + (nb_charnieres * 8.00) + (nb_tiroirs * 187.00) + forfait_materiel
+    st.subheader("2. Main d'Œuvre & Déplacements (Modifiable)")
+    df_mo_edited = st.data_editor(
+        st.session_state['devis_mo'],
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "Heures": st.column_config.NumberColumn(min_value=0.0, step=0.5),
+            "Taux Horaire Vente (€/h)": st.column_config.NumberColumn(format="%.2f €/h")
+        }
+    )
+    st.session_state['devis_mo'] = df_mo_edited
 
-    st.subheader("2. Main d'Œuvre & Déplacements")
-    c_mo1, c_mo2, c_mo3 = st.columns(3)
-    
-    with c_mo1:
-        h_etude = st.number_input("Heures Étude (70€/h)", value=0.0, step=0.5)
-        h_fab = st.number_input("Heures M.O Fab (75€/h)", value=0.0, step=0.5)
-    with c_mo2:
-        h_pose = st.number_input("Heures M.O Pose (75€/h)", value=0.0, step=0.5)
-        h_chargement = st.number_input("Heures M.O Chargement (75€/h)", value=0.0, step=0.5)
-    with c_mo3:
-        h_depl_pose = st.number_input("Heures Déplacement Pose (75€/h)", value=0.0, step=0.5)
-        km_forfait = st.number_input("Distance Kilométrique (0.606 €/km)", value=0.0, step=10.0)
+    km_forfait = st.number_input("Distance Kilométrique (0.606 €/km)", value=0.0, step=10.0)
 
-    ventes_mo = (h_etude * 70.0) + ((h_fab + h_pose + h_chargement + h_depl_pose) * 75.0) + (km_forfait * 0.606)
-    total_heures = h_etude + h_fab + h_pose + h_chargement + h_depl_pose
+    total_heures = df_mo_edited["Heures"].sum()
+    ventes_mo = (df_mo_edited["Heures"] * df_mo_edited["Taux Horaire Vente (€/h)"]).sum() + (km_forfait * 0.606)
 
     total_ca = ventes_mat + ventes_mo
     ca_moins_achats = total_ca - achats_mat
