@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
-import os
+import qrcode
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.lib.units import mm
 
 # Import des bibliothèques pour PDF et QR Codes
 try:
@@ -354,7 +356,5 @@ elif menu == "📦 Stock & QR Codes":
             mime="application/pdf",
             icon="🖨️"
         )
-    except Exception:
-        col2.warning("Installation des modules PDF en cours, patientez...")
 
     st.dataframe(df_stock, use_container_width=True)
