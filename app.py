@@ -4,7 +4,7 @@ from datetime import datetime
 import os
 import io
 
-# Import direct des bibliothèques d'impression
+# Import des bibliothèques d'impression
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
@@ -106,14 +106,14 @@ def generer_pdf_etiquettes(df):
         x = margin_x + (col * w_label)
         y = height - (margin_y + (r + 1) * h_label)
 
+        # Correction : extraction de l'image au format PIL
         qr = qrcode.QRCode(box_size=10, border=1)
-        qr.add_data(row['Réf'])
+        qr.add_data(str(row['Réf']))
         qr.make(fit=True)
-        img_qr = qr.make_image(fill_color="black", back_color="white")
+        img_qr = qr.make_image(fill_color="black", back_color="white").get_image()
         
-        qr_bytes = io.BytesIO()
-        img_qr.save(qr_bytes)
-        p.drawInlineImage(qr_bytes, x + 2*mm, y + 2*mm, width=15*mm, height=15*mm)
+        # Dessin direct de l'image PIL
+        p.drawInlineImage(img_qr, x + 2*mm, y + 2*mm, width=15*mm, height=15*mm)
 
         designation = str(row['Désignation'])
         if len(designation) > 28:
