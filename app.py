@@ -1,19 +1,14 @@
 import streamlit as st
 import pandas as pd
-import qrcode
+from datetime import datetime
+import os
+import io
+
+# Import direct des bibliothèques d'impression
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
-
-# Import des bibliothèques pour PDF et QR Codes
-try:
-    from reportlab.lib.pagesizes import A4
-    from reportlab.pdfgen import canvas
-    from reportlab.lib.units import mm
-    import qrcode
-    from io import BytesIO
-except ImportError:
-    st.error("Les bibliothèques d'impression (reportlab, qrcode) sont en cours d'installation. Rafraîchissez la page dans quelques instants.")
+import qrcode
 
 st.set_page_config(page_title="Gestion Menuiserie", layout="wide")
 
@@ -81,9 +76,9 @@ if 'remises_cheques' not in st.session_state:
 if 'stock_articles' not in st.session_state:
     st.session_state['stock_articles'] = df_stock_base.to_dict('records')
 
-# FONCTION GENERATION PDF (Format Avery 21/feuille)
+# FONCTION GENERATION PDF (Format Avery 21/feuille : 33,5 mm × 38,1 mm)
 def generer_pdf_etiquettes(df):
-    buffer = BytesIO()
+    buffer = io.BytesIO()
     p = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
     
@@ -116,18 +111,18 @@ def generer_pdf_etiquettes(df):
         qr.make(fit=True)
         img_qr = qr.make_image(fill_color="black", back_color="white")
         
-        qr_bytes = BytesIO()
+        qr_bytes = io.BytesIO()
         img_qr.save(qr_bytes)
         p.drawInlineImage(qr_bytes, x + 2*mm, y + 2*mm, width=15*mm, height=15*mm)
 
-        designation = row['Désignation']
+        designation = str(row['Désignation'])
         if len(designation) > 28:
             designation = designation[:26] + "..."
             
         p.drawString(x + 19*mm, y + 13*mm, designation)
         p.setFont("Helvetica", 7)
         p.drawString(x + 19*mm, y + 10*mm, f"Réf: {row['Réf']}")
-        p.drawString(x + 19*mm, y + 10*mm, f"Prix: {row['Prix Unitaire HT']:.2f} €HT / {row['Unité']}")
+        p.drawString(x + 19*mm, y + 7*mm, f"Prix: {row['Prix Unitaire HT']:.2f} €HT / {row['Unité']}")
         p.setFont("Helvetica-Bold", 8)
         p.rect(x, y, w_label, h_label)
 
@@ -185,14 +180,13 @@ if menu == "📊 Rentabilité & Planning":
         st.dataframe(df_heures, use_container_width=True)
 
 # ==============================================================================
-# MODULE 2 : BROUILLON DEVIS & MARGES (Basé sur 00 DEVIS.xlsx)
+# MODULE 2 : BROUILLON DEVIS & MARGES
 # ==============================================================================
 elif menu == "🧮 Brouillon Devis & Marges":
     st.title("🧮 Brouillon de Devis & Calculateur de Marges")
     st.info("Ce calculateur reproduit la trame de votre fichier Excel 00 DEVIS.xlsx pour chiffrer vos fournitures et heures.")
 
     st.subheader("1. Fournitures & Matériaux")
-    
     col_mat1, col_mat2 = st.columns(2)
     
     with col_mat1:
@@ -206,7 +200,6 @@ elif menu == "🧮 Brouillon Devis & Marges":
         nb_tiroirs = st.number_input("Nb Tiroirs (forfait)", value=0, step=1)
         forfait_materiel = st.number_input("Fourniture matériels divers (€)", value=0.0, step=10.0)
 
-    # Coûts fixes d'achat & vente selon votre tableur
     achats_mat = (m2_caissons * 7.80) + (m2_facades * 15.00) + (m2_fond * 8.80) + (ml_chant * 0.65) + (nb_charnieres * 5.00) + (nb_tiroirs * 170.00) + forfait_materiel
     ventes_mat = (m2_caissons * 12.48) + (m2_facades * 24.00) + (m2_fond * 14.08) + (ml_chant * 1.04) + (nb_charnieres * 8.00) + (nb_tiroirs * 187.00) + forfait_materiel
 
@@ -226,7 +219,6 @@ elif menu == "🧮 Brouillon Devis & Marges":
     ventes_mo = (h_etude * 70.0) + ((h_fab + h_pose + h_chargement + h_depl_pose) * 75.0) + (km_forfait * 0.606)
     total_heures = h_etude + h_fab + h_pose + h_chargement + h_depl_pose
 
-    # Ratios & Synthèse
     total_ca = ventes_mat + ventes_mo
     ca_moins_achats = total_ca - achats_mat
     pct_materiaux = (achats_mat / total_ca * 100) if total_ca > 0 else 0.0
@@ -298,7 +290,7 @@ elif menu == "💰 Trésorerie & Engagements":
         st.dataframe(df_treso, use_container_width=True)
 
 # ==============================================================================
-# MODULE 5 : REMISES DE CHÈQUES (Basé sur Papier remise de cheques.xlsx)
+# MODULE 5 : REMISES DE CHÈQUES
 # ==============================================================================
 elif menu == "🏦 Remises de Chèques":
     st.title("🏦 Gestion des Remises de Chèques")
@@ -347,14 +339,13 @@ elif menu == "📦 Stock & QR Codes":
     col1, col2 = st.columns([3, 1])
     col1.write(f"Total des références en base : **{len(df_stock)} articles**")
 
-    try:
-        pdf_etiquettes = generer_pdf_etiquettes(df_stock)
-        col2.download_button(
-            label="📄 Imprimer Épreuves Étiquettes (21/feuille)",
-            data=pdf_etiquettes,
-            file_name="epreuves_etiquettes_quincaillerie.pdf",
-            mime="application/pdf",
-            icon="🖨️"
-        )
+    pdf_etiquettes = generer_pdf_etiquettes(df_stock)
+    col2.download_button(
+        label="📄 Imprimer Épreuves Étiquettes (21/feuille)",
+        data=pdf_etiquettes,
+        file_name="epreuves_etiquettes_quincaillerie.pdf",
+        mime="application/pdf",
+        icon="🖨️"
+    )
 
     st.dataframe(df_stock, use_container_width=True)
