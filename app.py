@@ -51,6 +51,7 @@ st.sidebar.title("🛠️ Menu Principal")
 menu = st.sidebar.radio(
     "Accéder à :",
     [
+        "🔎 Synthèse par Chantier",
         "📅 Lundi Administratif & Devis",
         "📊 Rentabilité & Planning", 
         "🧮 Brouillon Devis & Marges",
@@ -157,9 +158,85 @@ def generer_pdf_etiquettes(df):
     return buffer
 
 # ==============================================================================
+# MODULE SYNTHÈSE PAR CHANTIER
+# ==============================================================================
+if menu == "🔎 Synthèse par Chantier":
+    st.title("🔎 Synthèse Globale Récapitulative par Chantier")
+    
+    chantier_sel = st.selectbox("🎯 Sélectionner le chantier à analyser :", LISTE_CHANTIERS)
+
+    # Filtrage des heures réelles du chantier
+    df_heures = pd.DataFrame(st.session_state['historique_heures'])
+    if not df_heures.empty and 'Chantier' in df_heures.columns:
+        df_heures_chantier = df_heures[df_heures['Chantier'] == chantier_sel]
+    else:
+        df_heures_chantier = pd.DataFrame()
+
+    heures_reelles_prod = df_heures_chantier[df_heures_chantier['Production'] == True]['Heures'].sum() if not df_heures_chantier.empty else 0.0
+    heures_reelles_totales = df_heures_chantier['Heures'].sum() if not df_heures_chantier.empty else 0.0
+
+    # Données du brouillon devis actuel
+    df_fourn = st.session_state['devis_fournitures']
+    df_mo = st.session_state['devis_mo']
+    
+    achats_mat = (df_fourn["Quantité"] * df_fourn["Prix d'achat HT"]).sum()
+    ventes_mat = (df_fourn["Quantité"] * df_fourn["Prix de vente HT"]).sum()
+    heures_devises = df_mo["Heures"].sum()
+    ventes_mo = (df_mo["Heures"] * df_mo["Taux Horaire Vente (€/h)"]).sum()
+
+    total_devis_ca = ventes_mat + ventes_mo
+    marge_brute_mat = ventes_mat - achats_mat
+
+    # Création des onglets récapitulatifs par chantier
+    tab_marge, tab_devis, tab_heures, tab_memo = st.tabs([
+        "📊 Rentabilité & Comparatif Prévu / Réel",
+        "🧮 Devis & Chiffrage associé",
+        "⏱️ Historique des Heures Réelles",
+        "📝 Pense-bête & Remarques"
+    ])
+
+    with tab_marge:
+        st.subheader("📊 Performance & Marges du Chantier")
+        
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("CA Devisé HT", f"{total_devis_ca:,.2f} €".replace(",", " "))
+        c2.metric("Heures Prévues (Devis)", f"{heures_devises:.1f} h")
+        c3.metric("Heures Réelles Passées", f"{heures_reelles_totales:.1f} h", delta=f"{heures_devises - heures_reelles_totales:.1f} h solde devis")
+        
+        taux_realise = ((total_devis_ca - achats_mat) / heures_reelles_totales) if heures_reelles_totales > 0 else 0.0
+        c4.metric("Taux Horaire Réel Dégagé", f"{taux_realise:.2f} €/h")
+
+        if heures_reelles_totales > heures_devises and heures_devises > 0:
+            st.error("⚠️ Attention : Le temps réel passé dépasse le nombre d'heures prévues au devis !")
+        elif heures_reelles_totales > 0:
+            st.success("🟢 Chantier sous contrôle au niveau du temps passé.")
+
+    with tab_devis:
+        st.subheader("🧮 Détail du Chiffrage / Devis du Chantier")
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            st.markdown("**Fournitures & Matériaux**")
+            st.dataframe(df_fourn[df_fourn['Quantité'] > 0], use_container_width=True)
+        with col_m2:
+            st.markdown("**Main d'Œuvre & Prestations**")
+            st.dataframe(df_mo[df_mo['Heures'] > 0], use_container_width=True)
+
+    with tab_heures:
+        st.subheader("⏱️ Détail des Pointages / Saisies")
+        if not df_heures_chantier.empty:
+            st.dataframe(df_heures_chantier, use_container_width=True)
+        else:
+            st.info("Aucune heure enregistrée pour ce chantier pour le moment.")
+
+    with tab_memo:
+        st.subheader("📝 Remarques & Mémos Chantier")
+        note_ch = st.session_state['pense_bete'].get(chantier_sel, "Aucune note saisie pour ce chantier.")
+        st.text_area("Note enregistrée :", value=note_ch, disabled=True, height=120)
+
+# ==============================================================================
 # MODULE 0 : LUNDI ADMINISTRATIF & DEVIS
 # ==============================================================================
-if menu == "📅 Lundi Administratif & Devis":
+elif menu == "📅 Lundi Administratif & Devis":
     st.title("📅 Lundi Administratif — Devis & Tâches")
     st.info("Espace dédié à la journée du lundi : suivi des devis à effectuer, relances et tâches administratives. Les tâches non réalisées se répercutent sur le lundi suivant.")
 
