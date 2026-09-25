@@ -11,6 +11,10 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 import qrcode
 
+# Bibliothèques pour le décodage d'images / QR Codes
+from PIL import Image
+from pyzbar.pyzbar import decode
+
 st.set_page_config(
     page_title="Gestion Menuiserie", 
     page_icon="🪵", 
@@ -310,8 +314,49 @@ elif menu == "📷 Scan QR Code Stock":
     img_captured = st.camera_input("Prendre en photo l'étiquette QR Code")
     
     if img_captured:
-        st.info("Traitement de l'image capturée...")
-        st.success("Fonction de lecture automatique active.")
+        # Charger l'image capturée
+        img = Image.open(img_captured)
+        
+        # Décodage du QR code dans l'image
+        decoded_objects = decode(img)
+        
+        if decoded_objects:
+            # Récupération de la valeur décodée (la référence)
+            qr_data = decoded_objects[0].data.decode("utf-8").strip()
+            st.success(f"✅ **QR Code détecté :** `{qr_data}`")
+            
+            # Recherche de l'article dans le stock
+            df_stock = st.session_state['stock_actuel']
+            article = df_stock[df_stock["Réf"] == qr_data]
+            
+            if not article.empty:
+                art_info = article.iloc[0]
+                st.markdown(f"### Article trouvé : **{art_info['Désignation']}**")
+                st.write(f"* **Catégorie :** {art_info['Catégorie']}")
+                st.write(f"* **Stock actuel :** {art_info['Quantité']} {art_info['Unité']}")
+                st.write(f"* **Prix unitaire HT :** {art_info['Prix Unitaire HT']} €")
+                
+                # Action rapide sur le stock
+                st.markdown("---")
+                st.subheader("Action rapide de stock")
+                c_act1, c_act2 = st.columns(2)
+                qte_retrait = c_act1.number_input("Quantité à retirer / ajouter", min_value=1.0, value=1.0, step=1.0)
+                
+                if c_act1.button("➖ Sortie de stock"):
+                    idx = df_stock[df_stock["Réf"] == qr_data].index[0]
+                    st.session_state['stock_actuel'].at[idx, "Quantité"] -= qte_retrait
+                    st.success(f"Retrait de {qte_retrait} effectué pour {qr_data}.")
+                    st.rerun()
+                    
+                if c_act2.button("➕ Entrée en stock"):
+                    idx = df_stock[df_stock["Réf"] == qr_data].index[0]
+                    st.session_state['stock_actuel'].at[idx, "Quantité"] += qte_retrait
+                    st.success(f"Ajout de {qte_retrait} effectué pour {qr_data}.")
+                    st.rerun()
+            else:
+                st.warning(f"La référence `{qr_data}` a été lue mais elle n'existe pas dans le stock actuel.")
+        else:
+            st.error("❌ Aucun QR Code n'a pu être lu sur cette photo. Essayez de vous rapprocher ou d'améliorer l'éclairage.")
 
 # ---------------------------------------------------------
 # 6. IMPRESSION ÉTIQUETTES STOCK
