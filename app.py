@@ -64,38 +64,43 @@ def charger_activites_souche():
     return taches_extraites if len(taches_extraites) >= 30 else ACTIVITES_INTEGRALES.copy()
 
 @st.cache_data
-def charger_donnees_kimai_heures():
-    fichiers_kimai = list(set(glob.glob("kimai-export*.xlsx") + glob.glob("*export*.xlsx")))
+def charger_donnees_kimai_heures(fichier_uploade=None):
+    fichiers_kimai = []
+    
+    # Priorité au fichier glissé-déposé par l'utilisateur
+    if fichier_uploade is not None:
+        fichiers_kimai = [fichier_uploade]
+    else:
+        fichiers_kimai = list(set(glob.glob("kimai-export*.xlsx") + glob.glob("*export*.xlsx")))
+    
     donnees_cumulees = []
     
     for fichier in fichiers_kimai:
-        if os.path.exists(fichier) and "activit" not in fichier.lower():
-            try:
-                df = pd.read_excel(fichier)
-                col_nom, col_total = df.columns[0], df.columns[1]
-                projet_actuel = "Général"
+        try:
+            df = pd.read_excel(fichier)
+            col_nom, col_total = df.columns[0], df.columns[1]
+            projet_actuel = "Général"
+            
+            for idx, row in df.iterrows():
+                val = str(row[col_nom]).strip()
+                try:
+                    total_heures = float(str(row[col_total]).replace(',', '.'))
+                except ValueError:
+                    total_heures = 0.0
                 
-                for idx, row in df.iterrows():
-                    val = str(row[col_nom]).strip()
-                    try:
-                        total_heures = float(str(row[col_total]).replace(',', '.'))
-                    except ValueError:
-                        total_heures = 0.0
-                    
-                    if val == "nan" or not val:
-                        continue
-                    
-                    # Détection du nom de chantier
-                    if any(val.startswith(p) for p in ["OE ", "25/", "26/", "Agencement"]):
-                        projet_actuel = val
-                    elif total_heures > 0:
-                        donnees_cumulees.append({
-                            "Projet": projet_actuel,
-                            "Tâche": val.replace('\t', ' - ').strip(),
-                            "Heures": total_heures
-                        })
-            except Exception:
-                pass
+                if val == "nan" or not val:
+                    continue
+                
+                if any(val.startswith(p) for p in ["OE ", "25/", "26/", "Agencement"]):
+                    projet_actuel = val
+                elif total_heures > 0:
+                    donnees_cumulees.append({
+                        "Projet": projet_actuel,
+                        "Tâche": val.replace('\t', ' - ').strip(),
+                        "Heures": total_heures
+                    })
+        except Exception:
+            pass
 
     df_kimai = pd.DataFrame(donnees_cumulees)
     
@@ -359,29 +364,30 @@ elif menu == "⏱️ Saisie des Heures":
 elif menu == "📊 Suivi Temps & Rentabilité Chantier":
     st.header("📊 Suivi Temps & Rentabilité par Chantier")
     
-    df_global = DF_KIMAI_HISTO.copy()
+    # Zone d'importation du fichier Excel Kimai propre
+    with st.expander("📁 Importer un nouvel export d'heures Kimai (.xlsx)", expanded=False):
+        fichier_excel = st.file_uploader("Glissez votre fichier d'export Kimai ici :", type=["xlsx", "xls"])
+        if fichier_excel is not None:
+            df_k, proj_k = charger_donnees_kimai_heures(fichier_excel)
+            st.success("Fichier d'heures rechargé avec succès !")
+        else:
+            df_k = DF_KIMAI_HISTO.copy()
+
+    df_global = df_k.copy()
     if st.session_state['historique_heures']:
         df_sess = pd.DataFrame(st.session_state['historique_heures'])
         df_sess.rename(columns={"Chantier": "Projet", "Code": "Tâche"}, inplace=True)
         df_global = pd.concat([df_global, df_sess[["Projet", "Tâche", "Heures", "Production"]]], ignore_index=True)
 
-    projet_sel = st.selectbox("🎯 Choisir le chantier :", st.session_state['liste_chantiers'])
+    liste_projets = sorted(df_global["Projet"].unique().tolist()) if not df_global.empty else st.session_state['liste_chantiers']
+    
+    projet_sel = st.selectbox("🎯 Choisir le chantier :", liste_projets)
     df_proj = df_global[df_global["Projet"] == projet_sel].copy()
     
     if not df_proj.empty:
-        # Filtre optionnel pour masquer les éléments parasites sans altérer les données brutes
-        taches_dispo = df_proj["Tâche"].unique().tolist()
-        taches_selectionnees = st.multiselect(
-            "🔎 Tâches à inclure dans l'affichage :", 
-            options=taches_dispo, 
-            default=taches_dispo
-        )
-        
-        df_filtr = df_proj[df_proj["Tâche"].isin(taches_selectionnees)]
-        
-        total_h = df_filtr["Heures"].sum()
-        h_prod = df_filtr[df_filtr["Production"] == True]["Heures"].sum()
-        h_bureau = df_filtr[df_filtr["Production"] == False]["Heures"].sum()
+        total_h = df_proj["Heures"].sum()
+        h_prod = df_proj[df_proj["Production"] == True]["Heures"].sum()
+        h_bureau = df_proj[df_proj["Production"] == False]["Heures"].sum()
         
         c_h1, c_h2, c_h3 = st.columns(3)
         c_h1.metric("⏱️ Total Heures Passées", f"{total_h:,.2f} h")
@@ -390,7 +396,7 @@ elif menu == "📊 Suivi Temps & Rentabilité Chantier":
         
         if total_h > 0:
             st.subheader("📉 Répartition des heures")
-            st.bar_chart(df_filtr.groupby("Tâche")["Heures"].sum())
+            st.bar_chart(df_proj.groupby("Tâche")["Heures"].sum())
             
         with st.expander("📄 Voir le détail de toutes les lignes d'heures brutes"):
             st.dataframe(df_proj, use_container_width=True)
