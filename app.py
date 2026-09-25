@@ -1,348 +1,200 @@
-import streamlit as st
+import json
+import sqlite3
+from datetime import date, datetime, timedelta
+from io import BytesIO
+from pathlib import Path
+
 import pandas as pd
-from datetime import datetime
-import os
-import io
+import streamlit as st
 
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from reportlab.lib.units import mm
-from reportlab.lib.utils import ImageReader
-import qrcode
+APP_DIR = Path(__file__).resolve().parent
+DB_PATH = APP_DIR / "atelier.db"
+DEFAULT_HOURLY_RATE = 57.0
 
-st.set_page_config(
-    page_title="Gestion Menuiserie",
-    page_icon="🪵",
-    layout="wide"
-)
-
-# ---------------------------------------------------------
-# CHARGEMENT AUTOMATIQUE DES DONNÉES EXCEL
-# ---------------------------------------------------------
-@st.cache_data
-def charger_donnees():
-    if os.path.exists("Inventaire stock .xlsx"):
-        try:
-            df_inv = pd.read_excel("Inventaire stock .xlsx", sheet_name="Inventaire pour bilan 2025")
-            df_inv = df_inv.dropna(subset=[df_inv.columns[0]])
-            df_inv.columns = ["Désignation", "Quantité", "Prix Unitaire HT", "Unité", "Total HT", "Col6", "Col7"][:len(df_inv.columns)]
-            df_inv = df_inv[df_inv["Désignation"] != "Désignation"]
-            df_inv["Réf"] = (
-                df_inv["Désignation"].astype(str)
-                .str.replace(r'[^a-zA-Z0-9\s-]', '', regex=True)
-                .str.strip()
-                .str.replace(' ', '-')
-            )
-
-            def categoriser(row):
-                des = str(row["Désignation"]).lower()
-                unite = str(row["Unité"]).lower()
-                if any(k in des for k in ["panneau", "mdf", "cp", "contreplaqué", "mélaminé", "chêne", "sapin", "avive", "dalle", "planche"]) or "m2" in unite or "m²" in unite:
-                    return "Panneaux & Bois"
-                return "Quincaillerie"
-
-            df_inv["Catégorie"] = df_inv.apply(categoriser, axis=1)
-            df_stock = df_inv[["Réf", "Désignation", "Catégorie", "Quantité", "Prix Unitaire HT", "Unité"]].dropna(subset=["Désignation"])
-        except Exception:
-            df_stock = pd.DataFrame([
-                {"Réf": "VIS-3x10", "Désignation": "VIS 3x10 BZ", "Catégorie": "Quincaillerie", "Quantité": 150, "Prix Unitaire HT": 0.05, "Unité": "U"},
-                {"Réf": "PAN-MDF-18", "Désignation": "Panneau MDF 18mm 2800x2070", "Catégorie": "Panneaux & Bois", "Quantité": 12, "Prix Unitaire HT": 42.50, "Unité": "m2"}
-            ])
-    else:
-        df_stock = pd.DataFrame([
-            {"Réf": "VIS-3x10", "Désignation": "VIS 3x10 BZ", "Catégorie": "Quincaillerie", "Quantité": 150, "Prix Unitaire HT": 0.05, "Unité": "U"},
-            {"Réf": "PAN-MDF-18", "Désignation": "Panneau MDF 18mm 2800x2070", "Catégorie": "Panneaux & Bois", "Quantité": 12, "Prix Unitaire HT": 42.50, "Unité": "m2"}
-        ])
-
-    df_stock["Réf"] = df_stock["Réf"].fillna("").astype(str)
-
-    if os.path.exists("kimai-projects_20260920152909.xlsx"):
-        try:
-            df_p = pd.read_excel("kimai-projects_20260920152909.xlsx")
-            df_p = df_p.dropna(subset=["Nom"])
-            liste_projets = df_p["Nom"].astype(str).tolist()
-        except Exception:
-            liste_projets = ["26/221 Fabrication et pose d'étagères", "26/227 Réfection plan de travail"]
-    else:
-        liste_projets = ["26/221 Fabrication et pose d'étagères", "26/227 Réfection plan de travail"]
-
-    return df_stock, liste_projets
-
-
-df_stock_base, LISTE_CHANTIERS = charger_donnees()
-
-LISTE_TACHES = [
-    "M1 - Montage atelier",
-    "D2 - Débit bois",
-    "P1 - Pose chantier",
-    "X5 - Bureau / Administration",
-    "X8 - Devis & Métrés"
+QUOTE_ROWS = [
+    {"Poste": "Etude", "Unité": "heures", "Prix achat HT": 70.0, "Coefficient vente": 1.0, "Référence fournisseur": ""},
+    {"Poste": "Panneaux de caissons", "Unité": "M²", "Prix achat HT": 7.8, "Coefficient vente": 1.6, "Référence fournisseur": ""},
+    {"Poste": "Panneaux de façade", "Unité": "M²", "Prix achat HT": 15.0, "Coefficient vente": 1.6, "Référence fournisseur": ""},
+    {"Poste": "Panneau de fond", "Unité": "M²", "Prix achat HT": 8.8, "Coefficient vente": 1.6, "Référence fournisseur": ""},
+    {"Poste": "Rouleau de chant", "Unité": "Ml", "Prix achat HT": 0.65, "Coefficient vente": 1.6, "Référence fournisseur": ""},
+    {"Poste": "Charnières + embases", "Unité": "pc", "Prix achat HT": 5.0, "Coefficient vente": 1.6, "Référence fournisseur": ""},
+    {"Poste": "Tiroirs", "Unité": "Forf pour 1", "Prix achat HT": 170.0, "Coefficient vente": 1.1, "Référence fournisseur": ""},
+    {"Poste": "Barre à penderie", "Unité": "", "Prix achat HT": 0.0, "Coefficient vente": 1.6, "Référence fournisseur": ""},
+    {"Poste": "Fourniture materiel", "Unité": "", "Prix achat HT": 0.0, "Coefficient vente": 1.6, "Référence fournisseur": ""},
+    {"Poste": "M.O Fab", "Unité": "heures", "Prix achat HT": 75.0, "Coefficient vente": 1.0, "Référence fournisseur": ""},
+    {"Poste": "M.O pose", "Unité": "heures", "Prix achat HT": 75.0, "Coefficient vente": 1.0, "Référence fournisseur": ""},
+    {"Poste": "M.O chargement", "Unité": "heures", "Prix achat HT": 75.0, "Coefficient vente": 1.0, "Référence fournisseur": ""},
+    {"Poste": "Deplacement pour pose", "Unité": "heures", "Prix achat HT": 75.0, "Coefficient vente": 1.0, "Référence fournisseur": ""},
+    {"Poste": "Forfait kilometrique", "Unité": "Km", "Prix achat HT": 0.606, "Coefficient vente": 1.0, "Référence fournisseur": ""},
+    {"Poste": "Relevé de cote", "Unité": "heures", "Prix achat HT": 0.0, "Coefficient vente": 1.0, "Référence fournisseur": ""},
+    {"Poste": "Intendance (appel téléphonique etc)", "Unité": "forf", "Prix achat HT": 0.0, "Coefficient vente": 1.0, "Référence fournisseur": ""},
+    {"Poste": "Déchetterie", "Unité": "% de perte", "Prix achat HT": 0.0, "Coefficient vente": 1.0, "Référence fournisseur": ""},
+    {"Poste": "Déplacement pour devis", "Unité": "heures", "Prix achat HT": 0.0, "Coefficient vente": 1.0, "Référence fournisseur": ""},
+    {"Poste": "Devis", "Unité": "forf", "Prix achat HT": 70.0, "Coefficient vente": 1.0, "Référence fournisseur": ""},
 ]
 
-if 'historique_heures' not in st.session_state:
-    st.session_state['historique_heures'] = []
 
-if 'stock_actuel' not in st.session_state:
-    st.session_state['stock_actuel'] = df_stock_base.copy()
+def db():
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    con.executescript("""
+    CREATE TABLE IF NOT EXISTS heures (id INTEGER PRIMARY KEY, jour TEXT, collaborateur TEXT, client TEXT, projet TEXT, heures REAL, production REAL, commentaire TEXT, statut TEXT DEFAULT 'Saisi');
+    CREATE TABLE IF NOT EXISTS mouvements (id INTEGER PRIMARY KEY, horodatage TEXT, article TEXT, quantite REAL, type TEXT, emplacement TEXT, reference TEXT, commentaire TEXT);
+    CREATE TABLE IF NOT EXISTS taches (id INTEGER PRIMARY KEY, semaine TEXT, titre TEXT, responsable TEXT, echeance TEXT, statut TEXT, archive INTEGER DEFAULT 0, note TEXT);
+    CREATE TABLE IF NOT EXISTS etiquettes (id INTEGER PRIMARY KEY, article TEXT, reference TEXT, lot TEXT, quantite INTEGER, cree_le TEXT);
+    """)
+    return con
 
-if 'mouvements_stock' not in st.session_state:
-    st.session_state['mouvements_stock'] = []
 
-# ---------------------------------------------------------
-# GENERATION PDF ETIQUETTES AVERY (63.5 mm x 38.1 mm - 21/page)
-# ---------------------------------------------------------
-def generer_pdf_etiquettes(df_a_imprimer):
-    buffer = io.BytesIO()
-    c = canvas.Canvas(buffer, pagesize=A4)
-    page_height = 297 * mm
+def money(v):
+    return f"{float(v or 0):,.2f} €".replace(",", " ").replace(".", ",")
 
-    w_label = 63.5 * mm
-    h_label = 38.1 * mm
 
-    margin_x = 7.2 * mm
-    margin_y = 15.1 * mm
-    gap_x = 2.5 * mm
-    gap_y = 0.0 * mm
-
-    cols = 3
-    rows = 7
-
-    col_idx = 0
-    row_idx = 0
-
-    for _, row in df_a_imprimer.iterrows():
-        ref = str(row['Réf'])
-        designation = str(row['Désignation'])
-
-        x = margin_x + col_idx * (w_label + gap_x)
-        y = page_height - margin_y - (row_idx + 1) * h_label - row_idx * gap_y
-
-        c.setStrokeColorRGB(0.85, 0.85, 0.85)
-        c.setLineWidth(0.2)
-        c.rect(x, y, w_label, h_label)
-
-        qr = qrcode.QRCode(box_size=2, border=1)
-        qr.add_data(ref)
-        qr.make(fit=True)
-        img_qr = qr.make_image(fill_color="black", back_color="white").get_image()
-        qr_image_reader = ImageReader(img_qr)
-
-        qr_size = 21 * mm
-        qr_x = x + (w_label - qr_size) / 2
-        qr_y = y + h_label - qr_size - 2.0 * mm
-        c.drawImage(qr_image_reader, qr_x, qr_y, width=qr_size, height=qr_size)
-
-        c.setFillColorRGB(0, 0, 0)
-        c.setFont("Helvetica-Bold", 8)
-        text_y_ref = qr_y - 3.5 * mm
-        c.drawCentredString(x + w_label / 2, text_y_ref, ref)
-
-        if designation and designation != ref:
-            c.setFont("Helvetica", 6.5)
-            text_y_des = text_y_ref - 3.5 * mm
-            c.drawCentredString(x + w_label / 2, text_y_des, designation[:35])
-
-        col_idx += 1
-        if col_idx >= cols:
-            col_idx = 0
-            row_idx += 1
-            if row_idx >= rows:
-                row_idx = 0
-                c.showPage()
-
-    c.save()
-    buffer.seek(0)
-    return buffer
-
-# ---------------------------------------------------------
-# MENU DE NAVIGATION PRINCIPAL
-# ---------------------------------------------------------
-st.sidebar.title("🛠️ Gestion Menuiserie")
-menu = st.sidebar.radio(
-    "Accéder aux modules :",
-    [
-        "⏱️ Saisie des Heures",
-        "📊 Suivi Temps & Production",
-        "🧮 Brouillon Devis & Marges",
-        "📦 Stock & Mouvements",
-        "📷 Scan QR Code Stock",
-        "🏷️ Impression Étiquettes Stock"
-    ]
-)
-
-# ---------------------------------------------------------
-# 1. SAISIE DES HEURES ATELIER & CHANTIER
-# ---------------------------------------------------------
-if menu == "⏱️ Saisie des Heures":
-    st.header("⏱️ Saisie Rapide des Heures Atelier & Chantier")
-
-    with st.form("form_saisie_heures", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            date_saisie = st.date_input("Date d'intervention", datetime.now())
-            chantier = st.selectbox("Chantier / Projet Kimai", LISTE_CHANTIERS)
-        with col2:
-            code_tache = st.selectbox("Tâche / Code Activité", LISTE_TACHES)
-            heures = st.number_input("Nombre d'heures effectuées", min_value=0.25, max_value=12.0, step=0.25, value=1.0)
-
-        valider = st.form_submit_button("💾 Enregistrer l'intervention")
-
-        if valider:
-            est_prod = not code_tache.startswith("X")
-            st.session_state['historique_heures'].append({
-                "Date": str(date_saisie),
-                "Chantier": chantier,
-                "Code": code_tache,
-                "Heures": heures,
-                "Production": est_prod
-            })
-            st.success(f"Enregistré : {heures}h sur **{chantier}** ({code_tache})")
-
-    st.subheader("📋 Dernières saisies de la session")
-    if st.session_state['historique_heures']:
-        st.dataframe(pd.DataFrame(st.session_state['historique_heures']), use_container_width=True)
-    else:
-        st.info("Aucune saisie effectuée au cours de la session active.")
-
-# ---------------------------------------------------------
-# 2. SUIVI TEMPS & PRODUCTION
-# ---------------------------------------------------------
-elif menu == "📊 Suivi Temps & Production":
-    st.header("📊 Suivi du Temps de Production")
-
-    OBJECTIF_HEBDO = 33.50
-
-    if st.session_state['historique_heures']:
-        df_h = pd.DataFrame(st.session_state['historique_heures'])
-        total_prod = df_h[df_h["Production"] == True]["Heures"].sum()
-        total_hors_prod = df_h[df_h["Production"] == False]["Heures"].sum()
-        total_general = total_prod + total_hors_prod
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Heures de Production", f"{total_prod:.2f} h", delta=f"{total_prod - OBJECTIF_HEBDO:.2f} h par rapport à l'objectif")
-        c2.metric("Heures Admin / Hors-Prod", f"{total_hors_prod:.2f} h")
-        c3.metric("Total Général", f"{total_general:.2f} h")
-
-        st.markdown("---")
-        st.subheader("Détail cumulé par chantier et activité")
-        df_recap = df_h.groupby(["Chantier", "Code", "Production"])["Heures"].sum().reset_index()
-        st.dataframe(df_recap, use_container_width=True)
-    else:
-        st.info("Saisissez des heures dans le module dédié pour afficher l'analyse temps.")
-
-# ---------------------------------------------------------
-# 3. BROUILLON DEVIS & MARGES
-# ---------------------------------------------------------
-elif menu == "🧮 Brouillon Devis & Marges":
-    st.header("🧮 Brouillon de Devis et Calcul de Marge")
-
-    st.subheader("1. Fournitures & Matériaux (Panneaux, Quincaillerie, Sous-traitance)")
-    col_mat1, col_mat2 = st.columns(2)
-    achats_mat = col_mat1.number_input("Total Achats Matériaux HT (€)", min_value=0.0, value=500.0, step=50.0)
-    ventes_mat = col_mat2.number_input("Total Facturé Matériaux HT (€)", min_value=0.0, value=750.0, step=50.0)
-
-    marge_euro = ventes_mat - achats_mat
-    taux_marque = (marge_euro / ventes_mat * 100) if ventes_mat > 0 else 0.0
-
-    c_m1, c_m2 = st.columns(2)
-    c_m1.caption(f"Marge brute fournitures : **{marge_euro:,.2f} € HT**")
-    c_m2.caption(f"Taux de marque : **{taux_marque:.1f} %**")
-
-    st.markdown("---")
-    st.subheader("2. Main d'Œuvre Prévisionnelle")
-    col_mo1, col_mo2 = st.columns(2)
-    heures_prev = col_mo1.number_input("Heures estimées (Atelier + Pose)", min_value=0.0, value=15.0, step=0.5)
-    taux_horaire = col_mo2.number_input("Taux Horaire Vendu HT (€/h)", min_value=0.0, value=55.0, step=5.0)
-
-    total_mo = heures_prev * taux_horaire
-    total_devis = ventes_mat + total_mo
-
-    st.markdown("---")
-    col_res1, col_res2 = st.columns(2)
-    col_res1.metric("Total Main d'Œuvre HT", f"{total_mo:,.2f} €")
-    col_res2.metric("Montant Total estimé Devis HT", f"{total_devis:,.2f} €")
-
-# ---------------------------------------------------------
-# 4. GESTION DU STOCK & MOUVEMENTS
-# ---------------------------------------------------------
-elif menu == "📦 Stock & Mouvements":
-    st.header("📦 Consultation et Gestion du Stock")
-
-    cat_filtre = st.radio("Filtrer par catégorie :", ["Tous", "Quincaillerie", "Panneaux & Bois"], horizontal=True)
-
-    df_stk = st.session_state['stock_actuel']
-    if cat_filtre != "Tous":
-        df_stk = df_stk[df_stk["Catégorie"] == cat_filtre]
-
-    st.dataframe(df_stk, use_container_width=True)
-
-    st.markdown("---")
-    st.subheader("🔄 Saisie manuelle d'un mouvement de stock")
-    with st.form("form_mvt_stock"):
-        c1, c2, c3 = st.columns(3)
-        ref_mvt = c1.selectbox("Article", st.session_state['stock_actuel']["Réf"].tolist())
-        type_mvt = c2.selectbox("Type d'opération", ["Sortie (Chantier)", "Entrée (Réception)"])
-        qte_mvt = c3.number_input("Quantité", min_value=1.0, value=1.0, step=1.0)
-
-        btn_mvt = st.form_submit_button("Valider le mouvement")
-        if btn_mvt:
-            idx = st.session_state['stock_actuel'][st.session_state['stock_actuel']["Réf"] == ref_mvt].index
-            if not idx.empty:
-                i = idx[0]
-                if "Sortie" in type_mvt:
-                    st.session_state['stock_actuel'].at[i, "Quantité"] -= qte_mvt
-                else:
-                    st.session_state['stock_actuel'].at[i, "Quantité"] += qte_mvt
-
-                st.session_state['mouvements_stock'].append({
-                    "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    "Réf": ref_mvt,
-                    "Type": type_mvt,
-                    "Quantité": qte_mvt
+def load_quote(uploaded=None):
+    rows = pd.DataFrame(QUOTE_ROWS)
+    if uploaded is None:
+        return rows
+    try:
+        book = pd.ExcelFile(uploaded)
+        sheet = "Info complémentaires" if "Info complémentaires" in book.sheet_names else book.sheet_names[0]
+        raw = pd.read_excel(uploaded, sheet_name=sheet, header=None)
+        parsed = []
+        for _, r in raw.iloc[3:27].iterrows():
+            if pd.notna(r.iloc[0]):
+                parsed.append({
+                    "Poste": str(r.iloc[0]), "Unité": str(r.iloc[1]) if pd.notna(r.iloc[1]) else "",
+                    "Prix achat HT": float(r.iloc[3]) if pd.notna(r.iloc[3]) and isinstance(r.iloc[3], (int, float)) else 0.0,
+                    "Coefficient vente": 1.0, "Référence fournisseur": "",
                 })
-                st.success(f"Stock mis à jour pour {ref_mvt} !")
-                st.rerun()
+        if parsed:
+            rows = pd.DataFrame(parsed)
+    except Exception as exc:
+        st.warning(f"Import Excel impossible : {exc}")
+    return rows
 
-# ---------------------------------------------------------
-# 5. SCANNER QR CODE STOCK
-# ---------------------------------------------------------
-elif menu == "📷 Scan QR Code Stock":
-    st.header("📷 Numérisation d'Étiquettes Quincaillerie / Stock")
-    st.write("Utilisez la caméra de votre smartphone ou tablette pour scanner une étiquette d'article.")
 
-    img_captured = st.camera_input("Prendre en photo l'étiquette QR Code")
+def page_saisie_heures():
+    st.header("⏱️ Saisie des heures")
+    with st.form("hours_form", clear_on_submit=True):
+        c1, c2, c3 = st.columns(3)
+        jour = c1.date_input("Jour", date.today())
+        collaborateur = c2.text_input("Collaborateur")
+        client = c3.text_input("Client / chantier")
+        c4, c5, c6 = st.columns(3)
+        projet = c4.text_input("Projet")
+        heures = c5.number_input("Heures", min_value=0.0, step=0.25)
+        production = c6.number_input("Production / unités", min_value=0.0, step=1.0)
+        commentaire = st.text_area("Commentaire")
+        if st.form_submit_button("Enregistrer", type="primary"):
+            if not collaborateur.strip() or not client.strip():
+                st.error("Le collaborateur et le client sont obligatoires.")
+            else:
+                con = db(); con.execute("INSERT INTO heures (jour,collaborateur,client,projet,heures,production,commentaire) VALUES (?,?,?,?,?,?,?)", (jour.isoformat(), collaborateur, client, projet, heures, production, commentaire)); con.commit(); con.close(); st.success("Saisie enregistrée.")
+    con = db(); df = pd.read_sql_query("SELECT * FROM heures ORDER BY jour DESC, id DESC LIMIT 100", con); con.close()
+    if not df.empty:
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
-    if img_captured:
-        st.info("Traitement de l'image capturée...")
-        st.success("Fonction de lecture automatique active.")
 
-# ---------------------------------------------------------
-# 6. IMPRESSION ÉTIQUETTES STOCK
-# ---------------------------------------------------------
-elif menu == "🏷️ Impression Étiquettes Stock":
-    st.header("🏷️ Impression d'Étiquettes QR Code pour Quincaillerie & Panneaux")
-    st.write("Format paramétré : **Avery 63,5 mm × 38,1 mm** (21 étiquettes par planche A4 - 3 colonnes × 7 lignes)")
+def page_suivi():
+    st.header("📊 Suivi Temps & Production")
+    con = db(); df = pd.read_sql_query("SELECT * FROM heures", con); con.close()
+    if df.empty:
+        st.info("Aucune saisie d'heures pour le moment."); return
+    df["jour"] = pd.to_datetime(df["jour"])
+    c1, c2 = st.columns(2)
+    start = c1.date_input("Du", df["jour"].min().date()); end = c2.date_input("Au", date.today())
+    f = df[(df["jour"].dt.date >= start) & (df["jour"].dt.date <= end)]
+    m1, m2, m3 = st.columns(3); m1.metric("Heures", f["heures"].sum()); m2.metric("Production", f["production"].sum()); m3.metric("Saisies", len(f))
+    st.bar_chart(f.groupby("jour")["heures"].sum())
+    st.dataframe(f, use_container_width=True, hide_index=True)
 
-    filtre_imp = st.selectbox("Catégorie à afficher :", ["Toutes", "Quincaillerie", "Panneaux & Bois"])
-    df_imp_base = st.session_state['stock_actuel']
-    if filtre_imp != "Toutes":
-        df_imp_base = df_imp_base[df_imp_base["Catégorie"] == filtre_imp]
 
-    st.dataframe(df_imp_base, use_container_width=True)
+def page_devis():
+    st.header("🧾 Brouillon devis & matrice")
+    uploaded = st.file_uploader("Importer / remplacer la matrice 00 DEVIS.xlsx", type=["xlsx"])
+    if "quote_df" not in st.session_state or uploaded is not None:
+        st.session_state.quote_df = load_quote(uploaded)
+    rate = st.number_input("Taux horaire de référence (€ HT)", min_value=0.0, value=DEFAULT_HOURLY_RATE, step=1.0)
+    df = st.session_state.quote_df.copy()
+    df["Quantité"] = 0.0
+    edited = st.data_editor(df, num_rows="dynamic", use_container_width=True, hide_index=True, column_config={"Prix achat HT": st.column_config.NumberColumn(format="%.2f €"), "Coefficient vente": st.column_config.NumberColumn(format="%.2f"), "Quantité": st.column_config.NumberColumn(min_value=0.0, step=0.25)})
+    edited["Prix vente unitaire HT"] = edited["Prix achat HT"].fillna(0) * edited["Coefficient vente"].fillna(1)
+    edited["Total achat HT"] = edited["Quantité"].fillna(0) * edited["Prix achat HT"].fillna(0)
+    edited["Total vente HT"] = edited["Quantité"].fillna(0) * edited["Prix vente unitaire HT"].fillna(0)
+    hours = edited.loc[edited["Unité"].astype(str).str.lower().str.contains("heure"), "Quantité"].sum()
+    ca = edited["Total vente HT"].sum(); achat = edited["Total achat HT"].sum(); marge = ca - achat
+    marque = marge / ca if ca else 0
+    a, b, c, d = st.columns(4); a.metric("Heures productives", f"{hours:.2f}"); b.metric("CA total HT", money(ca)); c.metric("Marge brute", money(marge)); d.metric("Taux de marque", f"{marque:.1%}")
+    st.caption(f"Taux horaire devis calculé : {ca / hours if hours else 0:.2f} € / h — référence {rate:.2f} € / h")
+    st.dataframe(edited[["Poste", "Unité", "Quantité", "Prix achat HT", "Prix vente unitaire HT", "Total achat HT", "Total vente HT", "Référence fournisseur"]], use_container_width=True, hide_index=True)
+    out = BytesIO(); edited.to_excel(out, index=False, sheet_name="Devis"); st.download_button("Télécharger le brouillon Excel", out.getvalue(), "brouillon_devis.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-    articles_selectionnes = st.multiselect(
-        "Sélectionnez les articles à imprimer sur la planche :",
-        options=df_imp_base["Réf"].tolist(),
-        default=df_imp_base["Réf"].tolist()[:3]
-    )
 
-    if articles_selectionnes:
-        df_filtr = df_imp_base[df_imp_base["Réf"].isin(articles_selectionnes)]
-        pdf_data = generer_pdf_etiquettes(df_filtr)
+def page_stock():
+    st.header("📦 Stock & mouvements")
+    with st.form("stock_form", clear_on_submit=True):
+        c = st.columns(4); article = c[0].text_input("Article"); typ = c[1].selectbox("Type", ["Entrée", "Sortie", "Inventaire"]); qty = c[2].number_input("Quantité", min_value=0.0, step=1.0); ref = c[3].text_input("Référence")
+        emp = st.text_input("Emplacement"); note = st.text_input("Commentaire")
+        if st.form_submit_button("Enregistrer mouvement"):
+            con = db(); con.execute("INSERT INTO mouvements (horodatage,article,quantite,type,emplacement,reference,commentaire) VALUES (?,?,?,?,?,?,?)", (datetime.now().isoformat(timespec="seconds"), article, qty, typ, emp, ref, note)); con.commit(); con.close(); st.success("Mouvement enregistré.")
+    con = db(); moves = pd.read_sql_query("SELECT * FROM mouvements ORDER BY id DESC", con); con.close()
+    if not moves.empty:
+        moves["variation"] = moves.apply(lambda r: r["quantite"] if r["type"] == "Entrée" else -r["quantite"] if r["type"] == "Sortie" else r["quantite"], axis=1)
+        st.subheader("Stock théorique par article"); st.dataframe(moves.groupby("article", as_index=False)["variation"].sum().rename(columns={"variation": "Stock"}), use_container_width=True, hide_index=True); st.dataframe(moves, use_container_width=True, hide_index=True)
 
-        st.download_button(
-            label="📄 Télécharger la planche d'étiquettes (PDF)",
-            data=pdf_data,
-            file_name="etiquettes_quincaillerie_avery.pdf",
-            mime="application/pdf"
-        )
+
+def page_qr():
+    st.header("🔎 Scan QR Code")
+    st.info("Utilisez la caméra de votre appareil ou saisissez le contenu du QR code.")
+    value = st.text_input("Contenu / référence scannée")
+    image = st.camera_input("Scanner avec la caméra")
+    if image:
+        st.warning("Décodage automatique optionnel : installez opencv-python et pyzbar pour activer le décodage caméra.")
+    if value: st.success(f"Code détecté : {value}"); st.session_state["last_qr"] = value
+
+
+def page_labels():
+    st.header("🏷️ Impression étiquettes")
+    c = st.columns(4); article = c[0].text_input("Article", value=st.session_state.get("last_qr", "")); ref = c[1].text_input("Référence"); lot = c[2].text_input("Lot"); qty = c[3].number_input("Nombre", 1, 500, 1)
+    cols = st.columns(3); width = cols[0].number_input("Largeur étiquette (mm)", 20.0, 210.0, 50.0); height = cols[1].number_input("Hauteur (mm)", 10.0, 150.0, 30.0); gap = cols[2].number_input("Espacement entre étiquettes (mm)", 0.0, 30.0, 3.0)
+    if st.button("Générer la planche d'étiquettes", type="primary"):
+        lines = ["<!doctype html><meta charset='utf-8'><style>", f"@page{{size:A4;margin:10mm}} body{{font-family:Arial;display:grid;grid-template-columns:repeat(auto-fill,{width}mm);gap:{gap}mm}} .label{{width:{width}mm;height:{height}mm;border:1px solid #111;box-sizing:border-box;padding:3mm;page-break-inside:avoid}}", "</style>"]
+        for i in range(int(qty)): lines.append(f"<div class='label'><b>{article or 'Article'}</b><br>Réf. : {ref}<br>Lot : {lot}<br><small>Étiquette {i+1}/{int(qty)}</small></div>")
+        html = "".join(lines); st.download_button("Télécharger la planche HTML à imprimer", html, "etiquettes.html", "text/html")
+
+
+def page_admin():
+    st.header("📅 Lundi administratif")
+    monday = date.today() - timedelta(days=date.today().weekday())
+    with st.form("task_form", clear_on_submit=True):
+        c = st.columns(4); title = c[0].text_input("Tâche"); who = c[1].text_input("Responsable"); due = c[2].date_input("Échéance", monday); status = c[3].selectbox("Statut", ["À faire", "En cours", "Fait", "Bloqué"]); note = st.text_input("Note")
+        if st.form_submit_button("Ajouter"):
+            con = db(); con.execute("INSERT INTO taches (semaine,titre,responsable,echeance,statut,note) VALUES (?,?,?,?,?,?)", (monday.isoformat(), title, who, due.isoformat(), status, note)); con.commit(); con.close(); st.rerun()
+    con = db(); tasks = pd.read_sql_query("SELECT * FROM taches WHERE archive=0 ORDER BY echeance,id", con); con.close()
+    if tasks.empty: st.info("Aucune tâche active."); return
+    for _, r in tasks.iterrows():
+        c1, c2, c3, c4 = st.columns([0.08, 0.42, 0.2, 0.2])
+        done = c1.checkbox("", key=f"done_{r['id']}", value=r["statut"] == "Fait")
+        c2.write(f"**{r['titre']}**\n\n{r['note'] or ''}"); c3.write(f"{r['responsable']}\n\nÉchéance : {r['echeance']}")
+        new_status = c4.selectbox("Statut", ["À faire", "En cours", "Fait", "Bloqué"], index=["À faire", "En cours", "Fait", "Bloqué"].index(r["statut"]), key=f"status_{r['id']}")
+        if done != (r["statut"] == "Fait") or new_status != r["statut"]:
+            con = db(); con.execute("UPDATE taches SET statut=? WHERE id=?", ("Fait" if done else new_status, int(r["id"]))); con.commit(); con.close(); st.rerun()
+    st.divider(); st.subheader("Rapport automatique")
+    report = tasks.groupby("statut").size().rename("Nombre").reset_index(); st.dataframe(report, hide_index=True, use_container_width=True)
+    text = "Rapport administratif — " + date.today().isoformat() + "\n" + report.to_string(index=False)
+    st.download_button("Télécharger le rapport", text, "rapport_lundi.txt", "text/plain")
+    if st.button("Archiver les tâches terminées"):
+        con = db(); con.execute("UPDATE taches SET archive=1 WHERE statut='Fait'"); con.commit(); con.close(); st.rerun()
+
+
+def main():
+    st.set_page_config(page_title="Atelier — Gestion", page_icon="🛠️", layout="wide")
+    st.title("🛠️ Atelier — Gestion de production")
+    pages = {"Saisie des Heures": page_saisie_heures, "Suivi Temps & Production": page_suivi, "Brouillon Devis & Matrice": page_devis, "Stock & Mouvements": page_stock, "Scan QR Code": page_qr, "Impression Étiquettes": page_labels, "Lundi Administratif": page_admin}
+    choice = st.sidebar.radio("Modules", list(pages))
+    st.sidebar.caption("Données locales SQLite · taux de référence devis : 57 € HT/h")
+    pages[choice]()
+
+
+if __name__ == "__main__":
+    main()
