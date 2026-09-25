@@ -23,44 +23,116 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# CHARGEMENT DES ACTIVITÉS DEPUIS TON FICHIER "Activités.xlsx"
+# REFERENTIEL COMPLET DES 62 ACTIVITES DE MENUISERIE
 # ---------------------------------------------------------
+ACTIVITES_INTEGRALES = [
+    # Débit (D1 - D7)
+    "D1 - Appro Débit",
+    "D2 - Débit massif",
+    "D3 - Scie à ruban",
+    "D4 - Scie à format",
+    "D5 - Scie à Panneaux",
+    "D6 - Scie à ruban métaux",
+    "D7 - Scie radiale",
+    # Corroyage (C1 - C3)
+    "C1 - Corroyeuse 4 faces",
+    "C2 - Dégauchissage",
+    "C3 - Rabotage",
+    # Usinage (U1 - U11)
+    "U1 - Toupie",
+    "U2 - Défonceuses",
+    "U3 - Scie à ruban",
+    "U4 - Plaqueuse",
+    "U5 - CN (Commande Numérique)",
+    "U6 - Tournage",
+    "U7 - Mortaisage",
+    "U8 - Tenonnage",
+    "U9 - Pointage machine",
+    "U10 - Usinage",
+    "U11 - Perçage manuel",
+    # Finition / Ponçage (B1 - B7)
+    "B1 - Finition manuelle",
+    "B2 - Ponceuse à bande",
+    "B3 - Placage chant main",
+    "B4 - Affleurage chants",
+    "B5 - Vitrage",
+    "B6 - Cassage d'arêtes",
+    "B7 - Brossage",
+    # Montage (M1 - M4)
+    "M1 - Montage (cadrage)",
+    "M2 - Montage caisses",
+    "M3 - Collage Px",
+    "M4 - Collage néoprène",
+    # Etudes / Devis / Bureau (X1 - X9)
+    "X1 - Étude de plan",
+    "X2 - Établissement",
+    "X3 - Traçage",
+    "X4 - Affûtage",
+    "X5 - Bureau",
+    "X6 - RDV Clientèle",
+    "X7 - Relevé de cotes",
+    "X8 - Mise en page devis",
+    "X9 - Création publication réseau",
+    # Vernissage / Peinture (V1 - V6)
+    "V1 - Vernissage pistolet",
+    "V2 - Laquage pistolet",
+    "V3 - Pinceau",
+    "V4 - Teinture",
+    "V5 - Égrenage",
+    "V6 - Traitement IFH",
+    # Quincaillerie (Q1)
+    "Q1 - Pose quincaillerie",
+    # Nettoyage / Atelier (N1 - N5)
+    "N1 - Nettoyage atelier",
+    "N2 - Rangement atelier",
+    "N3 - Affûtage atelier",
+    "N4 - Changement sac aspi",
+    "N5 - Changement plaquettes",
+    # Transport / Manutention (T1 - T5)
+    "T1 - Trajet",
+    "T2 - Chargement",
+    "T3 - Mise au séchoir",
+    "T4 - Emballage",
+    "T5 - Manutention",
+    # Pose / Chantier (P1 - P5)
+    "P1 - Pose sur chantier",
+    "P2 - Démontage",
+    "P3 - Évacuation",
+    "P4 - Fab gabarits",
+    "P5 - Rangement nettoyage chantier"
+]
+
 @st.cache_data
 def charger_activites_souche():
     fichier_souche = "Activités.xlsx"
-    taches_uniques = []
+    taches_extraites = []
     
     if os.path.exists(fichier_souche):
         try:
-            df_act = pd.read_excel(fichier_souche, sheet_name="Réf")
+            # Lecture de toutes les feuilles ou de la feuille 'Réf'
+            xls = pd.ExcelFile(fichier_souche)
+            sheet = "Réf" if "Réf" in xls.sheet_names else xls.sheet_names[0]
+            df_act = pd.read_excel(xls, sheet_name=sheet)
             
-            # Reconstruction propre des activités (Code - Libellé)
+            # Parcours de toutes les paires de colonnes pour extraire (Code + Intitulé)
             for idx, row in df_act.iterrows():
-                code = str(row['D1']).strip() if pd.notna(row['D1']) else ""
-                nom = str(row['Appro Débit']).strip() if pd.notna(row['Appro Débit']) else ""
-                
-                if code and nom and code != "nan" and nom != "nan":
-                    taches_uniques.append(f"{code} - {nom}")
-        except Exception as e:
-            st.error(f"Erreur lors de la lecture de Activités.xlsx : {e}")
+                vals = [str(val).strip() for val in row.values if pd.notna(val) and str(val).strip() != "nan"]
+                for i in range(len(vals) - 1):
+                    code = vals[i]
+                    intitule = vals[i+1]
+                    # Détection d'un code activité (ex: D1, U10, P5...)
+                    if len(code) <= 4 and code[0].isalpha() and code[1:].isdigit():
+                        elem = f"{code} - {intitule}"
+                        if elem not in taches_extraites:
+                            taches_extraites.append(elem)
+        except Exception:
+            pass
 
-    # En cas d'absence du fichier, liste de secours complète des 62 activités
-    if not taches_uniques:
-        taches_uniques = [
-            "D2 - Débit massif", "D3 - Scie à ruban", "D4 - Scie à format", "D5 - Scie à Panneaux", "D6 - Scie à rubau metaux", "D7 - Scie radial",
-            "C1 - Corroyeuse 4 faces", "C2 - Dégauchissage", "C3 - Rabotage",
-            "U1 - Toupie", "U2 - Défonceuses", "U3 - Scie à ruban", "U4 - Plaqueuse", "U5 - CN", "U6 - Tournage", "U7 - Mortaisage", "U8 - Tennonage", "U9 - Pointage machine", "U10 - Usinage", "U11 - Perçage manuelle",
-            "B1 - Finition manuelle", "B2 - Ponceuse à bande", "B3 - Placage chant main", "B4 - Affleurage chants", "B5 - Vitrage", "B6 - Cassage d'arrêtes", "B7 - Brossage",
-            "M1 - Montage (cadrage)", "M2 - Montage caisses", "M3 - Collage Px", "M4 - Collage neoprene",
-            "X1 - Etude de plan", "X2 - Etablissement", "X3 - Traçage", "X4 - Affutage", "X5 - Bureau", "X6 - RDV Clientèle", "X7 - Relevé de côtes", "X8 - Mise en page devis", "X9 - Création publication réseau",
-            "V1 - Vernissage pistolet", "V2 - Laquage pistolet", "V3 - Pinceau", "V4 - Teinture", "V5 - Egrenage", "V6 - Traitement IFH",
-            "Q1 - Pose quincaillerie",
-            "N1 - Nettoyage atelier", "N2 - Rangement atelier", "N3 - Affutage", "N4 - Changement sac aspi", "N5 - Changement plaquettes",
-            "T1 - Trajet", "T2 - Chargement", "T3 - Mise au sechoir", "T4 - Emballage", "T5 - Manutention",
-            "P1 - Pose sur chantier", "P2 - Demontage", "P3 - Evacuation", "P4 - Fab gabarits", "P5 - Rangement nettoyage chantier"
-        ]
-
-    return taches_uniques
+    # Si la lecture automatique extrait moins de 30 activités, on bascule sur la liste intégrale des 62
+    if len(taches_extraites) < 30:
+        return ACTIVITES_INTEGRALES.copy()
+        
+    return taches_extraites
 
 # ---------------------------------------------------------
 # CHARGEMENT DES EXPORTS HEURES ET DU STOCK
@@ -172,14 +244,14 @@ if 'mouvements_stock' not in st.session_state:
     st.session_state['mouvements_stock'] = []
 
 # ---------------------------------------------------------
-# GENERATION PDF ETIQUETTES AVERY (63.5 mm x 38.1 mm)
+# GENERATION PDF ETIQUETTES AVERY (33.5 mm x 38.1 mm)
 # ---------------------------------------------------------
 def generer_pdf_etiquettes(df_a_imprimer):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     page_height = 297 * mm
     
-    w_label = 63.5 * mm
+    w_label = 33.5 * mm
     h_label = 38.1 * mm
     margin_x = 7.2 * mm
     margin_y = 11.1 * mm
@@ -219,7 +291,7 @@ def generer_pdf_etiquettes(df_a_imprimer):
         if designation and designation != ref:
             c.setFont("Helvetica", 6.5)
             text_y_des = text_y_ref - 3.5 * mm
-            c.drawCentredString(x + w_label / 2, text_y_des, designation[:35])
+            c.drawCentredString(x + w_label / 2, text_y_des, designation[:25])
         
         col_idx += 1
         if col_idx >= cols:
@@ -255,13 +327,15 @@ menu = st.sidebar.radio(
 if menu == "⏱️ Saisie des Heures":
     st.header("⏱️ Saisie Rapide des Heures Atelier & Chantier")
     
+    st.info(f"💡 **{len(st.session_state['liste_taches'])} activités disponibles** dans le sélecteur ci-dessous.")
+    
     with st.form("form_saisie_heures", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
             date_saisie = st.date_input("Date d'intervention", datetime.now())
             chantier = st.selectbox("Chantier / Projet", LISTE_CHANTIERS)
         with col2:
-            code_tache = st.selectbox("Tâche / Activité (issue de Activités.xlsx)", st.session_state['liste_taches'])
+            code_tache = st.selectbox("Tâche / Activité", st.session_state['liste_taches'])
             heures = st.number_input("Nombre d'heures effectuées", min_value=0.25, max_value=12.0, step=0.25, value=1.0)
             
         valider = st.form_submit_button("💾 Enregistrer l'intervention")
@@ -277,7 +351,7 @@ if menu == "⏱️ Saisie des Heures":
             })
             st.success(f"Enregistré : {heures}h sur **{chantier}** ({code_tache})")
 
-    with st.expander("➕ Ajouter une nouvelle tâche / activité personnalisée"):
+    with st.expander("➕ Ajouter une nouvelle tâche / activité sur-mesure"):
         with st.form("form_nouvelle_tache", clear_on_submit=True):
             col_nt1, col_nt2 = st.columns([3, 1])
             nouvelle_tache_nom = col_nt1.text_input("Nom de la nouvelle tâche", placeholder="Z1 - Maquette d'essai")
