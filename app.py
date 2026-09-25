@@ -85,11 +85,10 @@ def charger_donnees_kimai_heures():
                     if val == "nan" or not val:
                         continue
                     
-                    # Détection du projet (selon tes préfixes habituels)
+                    # Détection du chantier / projet
                     if any(val.startswith(p) for p in ["OE ", "25/", "26/", "Agencement"]):
                         projet_actuel = val
                     else:
-                        # On prend TOUTES les lignes qui ont des heures > 0
                         if total_heures > 0:
                             donnees_cumulees.append({
                                 "Projet": projet_actuel,
@@ -101,10 +100,12 @@ def charger_donnees_kimai_heures():
 
     df_kimai = pd.DataFrame(donnees_cumulees)
     
-    # Sécurisation : si un nom de tâche est exactement un nom de projet/client parasite, on le nettoie
     if not df_kimai.empty:
-        # On supprime uniquement les lignes où le nom de la tâche est un doublon exact du nom du chantier
-        df_kimai = df_kimai[df_kimai["Tâche"] != df_kimai["Projet"]]
+        # RÈGLE DE FILTRAGE STRICTE :
+        # Une tâche valide commence OBLIGATOIREMENT par une lettre suivie d'un chiffre (ex: C2, D1, T1, U1, X5...)
+        # Cela élimine d'un coup tous les noms de clients comme "SAMBA Pascal" sans toucher à tes heures.
+        pattern_tache_valide = r'^[A-Za-z][0-9]'
+        df_kimai = df_kimai[df_kimai["Tâche"].str.contains(pattern_tache_valide, regex=True, na=False)]
         
         def est_production(tache):
             t = str(tache).upper()
