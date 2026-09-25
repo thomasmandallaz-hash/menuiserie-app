@@ -11,9 +11,9 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 import qrcode
 
-# Bibliothèques pour le décodage d'images / QR Codes
+# Bibliothèques pour la lecture de QR Codes (sans dépendance système Linux)
 from PIL import Image
-from pyzbar.pyzbar import decode
+import zxingcpp
 
 st.set_page_config(
     page_title="Gestion Menuiserie", 
@@ -305,7 +305,7 @@ elif menu == "📦 Stock & Mouvements":
                 st.rerun()
 
 # ---------------------------------------------------------
-# 5. SCANNER QR CODE STOCK
+# 5. SCANNER QR CODE STOCK (Décodage via zxing-cpp)
 # ---------------------------------------------------------
 elif menu == "📷 Scan QR Code Stock":
     st.header("📷 Numérisation d'Étiquettes Quincaillerie / Stock")
@@ -314,15 +314,15 @@ elif menu == "📷 Scan QR Code Stock":
     img_captured = st.camera_input("Prendre en photo l'étiquette QR Code")
     
     if img_captured:
-        # Charger l'image capturée
+        # Charger l'image capturée avec PIL
         img = Image.open(img_captured)
         
-        # Décodage du QR code dans l'image
-        decoded_objects = decode(img)
+        # Décodage du QR code avec zxingcpp
+        results = zxingcpp.read_barcodes(img)
         
-        if decoded_objects:
-            # Récupération de la valeur décodée (la référence)
-            qr_data = decoded_objects[0].data.decode("utf-8").strip()
+        if results:
+            # Récupération du texte contenu dans le premier QR code détecté
+            qr_data = results[0].text.strip()
             st.success(f"✅ **QR Code détecté :** `{qr_data}`")
             
             # Recherche de l'article dans le stock
