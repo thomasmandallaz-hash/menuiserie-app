@@ -158,8 +158,11 @@ DEVIS_MATRICE_BASE = [
 
 # Initialisations
 LISTE_TACHES_SOUCHE = charger_activites_souche()
-DF_KIMAI_HISTO, LISTE_CHANTIERS = charger_donnees_kimai_heures()
+DF_KIMAI_HISTO, PROJETS_KIMAI = charger_donnees_kimai_heures()
 DF_STOCK_BASE = charger_stock()
+
+if 'liste_chantiers' not in st.session_state:
+    st.session_state['liste_chantiers'] = PROJETS_KIMAI.copy()
 
 if 'historique_heures' not in st.session_state:
     st.session_state['historique_heures'] = []
@@ -170,11 +173,11 @@ if 'liste_taches' not in st.session_state:
 if 'stock_actuel' not in st.session_state:
     st.session_state['stock_actuel'] = DF_STOCK_BASE.copy()
 
-if 'devis_grid' not in st.session_state:
-    st.session_state['devis_grid'] = pd.DataFrame(DEVIS_MATRICE_BASE)
-
-if 'achats_projets' not in st.session_state:
-    st.session_state['achats_projets'] = {}
+# Dictionnaire regroupant les brouillons de devis par chantier
+if 'devis_par_chantier' not in st.session_state:
+    st.session_state['devis_par_chantier'] = {}
+    for p in st.session_state['liste_chantiers']:
+        st.session_state['devis_par_chantier'][p] = pd.DataFrame(DEVIS_MATRICE_BASE)
 
 # ---------------------------------------------------------
 # ETINETTES AVERY (33.5 x 38.1 mm)
@@ -246,18 +249,42 @@ menu = st.sidebar.radio(
 )
 
 # ---------------------------------------------------------
-# 1. BROUILLON DEVIS CONFORME AU FICHIER 00 DEVIS.XLSX
+# 1. BROUILLON DEVIS PAR CHANTIER
 # ---------------------------------------------------------
 if menu == "🧮 Brouillon Devis & Calcul de Marge":
-    st.header("🧮 Brouillon de Devis et Calcul de Marge (Conforme `00 DEVIS.xlsx`)")
+    st.header("🧮 Brouillon de Devis et Calcul de Marge")
     
-    st.info("💡 **Grille officielle du devis** : Saisissez les quantités (Q) et adaptez les prix si nécessaire.")
+    # Zone de sélection et de création de chantier
+    col_sel, col_add = st.columns([2, 1])
     
-    df_devis = st.session_state['devis_grid'].copy()
+    with col_sel:
+        chantier_devis = st.selectbox("📂 Sélectionner le chantier :", st.session_state['liste_chantiers'], key="sel_chantier_devis")
+        
+    with col_add:
+        st.write("➕ **Créer un nouveau chantier**")
+        nouveau_chantier = st.text_input("Nom / Réf du nouveau chantier", placeholder="Ex: 26/230 Agencement Cuisine", label_visibility="collapsed")
+        if st.button("➕ Ajouter le chantier"):
+            nom_clean = nouveau_chantier.strip()
+            if nom_clean and nom_clean not in st.session_state['liste_chantiers']:
+                st.session_state['liste_chantiers'].append(nom_clean)
+                st.session_state['devis_par_chantier'][nom_clean] = pd.DataFrame(DEVIS_MATRICE_BASE)
+                st.success(f"Chantier '{nom_clean}' créé avec son devis type !")
+                st.rerun()
+            elif nom_clean in st.session_state['liste_chantiers']:
+                st.warning("Ce chantier existe déjà.")
     
-    # Éditeur de données verrouillé sur la structure
+    st.markdown("---")
+    st.subheader(f"📋 Brouillon de Devis : `{chantier_devis}`")
+    st.caption("Chaque modification apportée ici est propre à ce chantier. Tu peux aussi utiliser le bouton en bas de tableau pour rajouter des lignes.")
+    
+    # Chargement du devis spécifique
+    if chantier_devis not in st.session_state['devis_par_chantier']:
+        st.session_state['devis_par_chantier'][chantier_devis] = pd.DataFrame(DEVIS_MATRICE_BASE)
+        
+    df_devis_actuel = st.session_state['devis_par_chantier'][chantier_devis].copy()
+    
     edited_df = st.data_editor(
-        df_devis,
+        df_devis_actuel,
         column_config={
             "Poste": st.column_config.TextColumn("Désignation / Poste", disabled=False),
             "U": st.column_config.SelectboxColumn("Unité (UV)", options=["heures", "M²", "Ml", "pc", "Forf pour 1", "Forf", "Km", "% perte", "Jour", "M3"], required=True),
@@ -267,10 +294,11 @@ if menu == "🧮 Brouillon Devis & Calcul de Marge":
         },
         num_rows="dynamic",
         use_container_width=True,
-        key="editor_devis"
+        key=f"editor_devis_{chantier_devis}"
     )
     
-    st.session_state['devis_grid'] = edited_df
+    # Sauvegarde automatique du brouillon du chantier
+    st.session_state['devis_par_chantier'][chantier_devis] = edited_df
     
     # Calculs automatiques des sous-totaux et marges
     edited_df["Total Achat HT"] = edited_df["Q"] * edited_df["Prix Achat HT"]
@@ -282,18 +310,18 @@ if menu == "🧮 Brouillon Devis & Calcul de Marge":
     marge_totale = edited_df["Marge Brute HT"].sum()
     taux_marque = (marge_totale / total_vente * 100) if total_vente > 0 else 0.0
     
-    # Filtrage Heures Productives devisées
+    # Filtrage des heures devisées
     heures_df = edited_df[edited_df["U"] == "heures"]
     total_heures_devis = heures_df["Q"].sum()
     
     st.markdown("---")
-    st.subheader("📊 Récapitulatif du Devis & Marge Globale")
+    st.subheader(f"📊 Synthèse & Marges pour `{chantier_devis}`")
     
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total Achat HT", f"{total_achat:,.2f} €")
-    c2.metric("Total Facturé Devis HT", f"{total_vente:,.2f} €")
+    c2.metric("Total Devis HT", f"{total_vente:,.2f} €")
     c3.metric("Marge Brute Globale", f"{marge_totale:,.2f} €", f"{taux_marque:.1f}% de marque")
-    c4.metric("Total Heures Devisées", f"{total_heures_devis:.2f} h")
+    c4.metric("Heures Devisées", f"{total_heures_devis:.2f} h")
 
 # ---------------------------------------------------------
 # 2. SAISIE DES HEURES
@@ -304,7 +332,7 @@ elif menu == "⏱️ Saisie des Heures":
         col1, col2 = st.columns(2)
         with col1:
             date_saisie = st.date_input("Date", datetime.now())
-            chantier = st.selectbox("Chantier / Projet", LISTE_CHANTIERS)
+            chantier = st.selectbox("Chantier / Projet", st.session_state['liste_chantiers'])
         with col2:
             code_tache = st.selectbox("Tâche / Activité", st.session_state['liste_taches'])
             heures = st.number_input("Heures", min_value=0.25, max_value=12.0, step=0.25, value=1.0)
@@ -331,7 +359,7 @@ elif menu == "📊 Suivi Temps & Rentabilité Chantier":
         df_sess.rename(columns={"Chantier": "Projet", "Code": "Tâche"}, inplace=True)
         df_global = pd.concat([df_global, df_sess[["Projet", "Tâche", "Heures", "Production"]]], ignore_index=True)
 
-    projet_sel = st.selectbox("🎯 Choisir le chantier :", LISTE_CHANTIERS)
+    projet_sel = st.selectbox("🎯 Choisir le chantier :", st.session_state['liste_chantiers'])
     df_proj = df_global[df_global["Projet"] == projet_sel]
     
     total_h = df_proj["Heures"].sum() if not df_proj.empty else 0.0
@@ -375,4 +403,4 @@ elif menu == "🏷️ Impression Étiquettes":
     articles = st.multiselect("Sélectionner les articles :", df_imp["Réf"].tolist(), default=df_imp["Réf"].tolist()[:3])
     if articles:
         pdf_data = generer_pdf_etiquettes(df_imp[df_imp["Réf"].isin(articles)])
-        st.download_button("📄 Télécharger le PDF (Avery)", pdf_data, "etiquettes.pdf","application/pdf")
+        st.download_button("📄 Télécharger le PDF (Avery)", pdf_data, "etiquettes.pdf", "application/pdf")
