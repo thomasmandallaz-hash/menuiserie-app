@@ -65,56 +65,80 @@ def charger_activites_souche():
 
 @st.cache_data
 def charger_donnees_kimai_heures(fichier_uploade=None):
-    fichiers_kimai = []
-    
-    # Priorité au fichier glissé-déposé par l'utilisateur
-    if fichier_uploade is not None:
-        fichiers_kimai = [fichier_uploade]
-    else:
-        fichiers_kimai = list(set(glob.glob("kimai-export*.xlsx") + glob.glob("*export*.xlsx")))
-    
-    donnees_cumulees = []
-    
-    for fichier in fichiers_kimai:
+  fichiers_kimai = []
+
+  if fichier_uploade is not None:
+    fichiers_kimai = [fichier_uploade]
+  else:
+    fichiers_kimai = list(
+        set(glob.glob("kimai-export*.xlsx") + glob.glob("*export*.xlsx"))
+    )
+
+  donnees_cumulees = []
+
+  # Préfixes des chantiers
+  prefixes_chantiers = ("OE ", "20/", "24/", "25/", "26/", "Agencement")
+
+  for fichier in fichiers_kimai:
+    try:
+      df = pd.read_excel(fichier)
+      col_nom, col_total = df.columns[0], df.columns[1]
+      projet_actuel = "Général"
+      nb_lignes = len(df)
+
+      for idx, row in df.iterrows():
+        val = str(row[col_nom]).strip()
+
+        # Nettoyage des heures
         try:
-            df = pd.read_excel(fichier)
-            col_nom, col_total = df.columns[0], df.columns[1]
-            projet_actuel = "Général"
-            
-            for idx, row in df.iterrows():
-                val = str(row[col_nom]).strip()
-                try:
-                    total_heures = float(str(row[col_total]).replace(',', '.'))
-                except ValueError:
-                    total_heures = 0.0
-                
-                if val == "nan" or not val:
-                    continue
-                
-                if any(val.startswith(p) for p in ["OE ", "25/", "26/", "Agencement"]):
-                    projet_actuel = val
-                elif total_heures > 0:
-                    donnees_cumulees.append({
-                        "Projet": projet_actuel,
-                        "Tâche": val.replace('\t', ' - ').strip(),
-                        "Heures": total_heures
-                    })
-        except Exception:
-            pass
+          total_heures = float(str(row[col_total]).replace(",", "."))
+        except (ValueError, TypeError):
+          total_heures = 0.0
 
-    df_kimai = pd.DataFrame(donnees_cumulees)
-    
-    if not df_kimai.empty:
-        def est_production(tache):
-            t = str(tache).upper()
-            return not (t.startswith("X") or "BUREAU" in t or "DEVIS" in t or "RDV" in t)
+        if val == "nan" or not val or val == "Totale":
+          continue
 
-        df_kimai["Production"] = df_kimai["Tâche"].apply(est_production)
-        projets_uniques = sorted(df_kimai["Projet"].unique().tolist())
-    else:
-        projets_uniques = ["OE 26/10 fabrication meuble enceinte", "26/221 Fabrication et pose d'étagères", "26/227 Réfection plan de travail"]
+        # 1. Détection si c'est un chantier
+        if val.startswith(prefixes_chantiers):
+          projet_actuel = val
+          continue
 
-    return df_kimai, projets_uniques
+        # 2. Détection si c'est une ligne Client (la ligne suivante est un chantier)
+        est_client = False
+        if idx + 1 < nb_lignes:
+          suivante = str(df.iloc[idx + 1, 0]).strip()
+          if suivante.startswith(prefixes_chantiers):
+            est_client = True
+
+        if est_client:
+          continue  # On ignore le sous-total client
+
+        # 3. C'est une vraie tâche avec des heures
+        if total_heures > 0:
+          donnees_cumulees.append({
+              "Projet": projet_actuel,
+              "Tâche": val.replace("\t", " - ").strip(),
+              "Heures": total_heures,
+          })
+    except Exception as e:
+      st.error(f"Erreur lors de la lecture du fichier : {e}")
+
+  df_kimai = pd.DataFrame(donnees_cumulees)
+
+  if not df_kimai.empty:
+
+    def est_production(tache):
+      t = str(tache).upper()
+      return not (
+          t.startswith("X") or "BUREAU" in t or "DEVIS" in t or "RDV" in t
+      )
+
+    df_kimai["Production"] = df_kimai["Tâche"].apply(est_production)
+    projets_uniques = sorted(df_kimai["Projet"].unique().tolist())
+  else:
+    projets_uniques = []
+
+  return df_kimai, projets_uniques
 @st.cache_data
 def charger_stock():
     fichiers_inv = glob.glob("*stock*.xlsx") + glob.glob("*Inventaire*.xlsx")
