@@ -1,6 +1,7 @@
 streamlit
 pandas
 openpyxl
-qrcode
 reportlab
-pillow
+qrcode
+Pillow
+pyzbar
