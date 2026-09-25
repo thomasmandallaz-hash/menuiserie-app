@@ -11,7 +11,7 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 import qrcode
 
-# Bibliothèques pour la lecture de QR Codes (sans dépendance système Linux)
+# Bibliothèques pour la lecture de QR Codes
 from PIL import Image
 import zxingcpp
 
@@ -22,10 +22,30 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# CHARGEMENT ET FUSION DES DONNÉES KIMAI (2025 + 2026)
+# CHARGEMENT ET FUSION DES DONNÉES KIMAI (Projets + Activités)
 # ---------------------------------------------------------
 @st.cache_data
 def charger_donnees_kimai():
+    # 1. Chargement de la liste des activités Kimai
+    fichier_activites = "kimai-activities_20260925104009.xlsx"
+    taches_uniques = []
+    
+    if os.path.exists(fichier_activites):
+        try:
+            df_act = pd.read_excel(fichier_activites)
+            if "Nom" in df_act.columns:
+                taches_raw = df_act["Nom"].dropna().astype(str).tolist()
+                taches_uniques = [t.replace('\t', ' - ').strip() for t in taches_raw]
+        except Exception as e:
+            st.error(f"Erreur lors de la lecture du fichier d'activités : {e}")
+
+    if not taches_uniques:
+        taches_uniques = [
+            "M1 - Montage (cadrage)", "D2 - Débit massif", "P1 - Pose sur chantier", 
+            "X5 - Bureau", "T1 - Trajet", "N1 - Nettoyage atelier"
+        ]
+
+    # 2. Chargement de l'historique d'heures (2025 + 2026)
     fichiers_kimai = [
         "kimai-export-user-yearly_20260925103809.xlsx",     # 2025
         "kimai-export-user-yearly_20260925103809 (1).xlsx" # 2026
@@ -54,15 +74,13 @@ def charger_donnees_kimai():
                     if val == "nan" or not val:
                         continue
                         
-                    # Détection s'il s'agit d'un projet (commence souvent par OE, 25/, 26/ ou nom d'entreprise)
-                    # Si la ligne ne commence pas par un code de tâche classique, on la traite comme un projet
                     if any(val.startswith(p) for p in ["OE ", "25/", "26/", "Agencement"]):
                         projet_actuel = val
                     else:
-                        # C'est une tâche/activité rattachée au projet actuel
+                        tache_cleanee = val.replace('\t', ' - ').strip()
                         donnees_cumulees.append({
                             "Projet": projet_actuel,
-                            "Tâche": val,
+                            "Tâche": tache_cleanee,
                             "Heures": total_heures,
                             "Fichier": fichier
                         })
@@ -71,7 +89,6 @@ def charger_donnees_kimai():
 
     df_kimai = pd.DataFrame(donnees_cumulees)
     
-    # Séparation automatique Production vs Admin
     def est_production(tache):
         t = str(tache).upper()
         if t.startswith("X") or "BUREAU" in t or "DEVIS" in t or "RDV" in t:
@@ -81,10 +98,8 @@ def charger_donnees_kimai():
     if not df_kimai.empty:
         df_kimai["Production"] = df_kimai["Tâche"].apply(est_production)
         projets_uniques = sorted(df_kimai["Projet"].unique().tolist())
-        taches_uniques = sorted(df_kimai["Tâche"].unique().tolist())
     else:
         projets_uniques = ["26/221 Fabrication et pose d'étagères", "26/227 Réfection plan de travail"]
-        taches_uniques = ["M1 - Montage atelier", "D2 - Débit bois", "P1 - Pose chantier", "X5 - Bureau / Administration"]
 
     return df_kimai, projets_uniques, taches_uniques
 
@@ -113,12 +128,15 @@ def charger_stock():
             {"Réf": "PAN-MDF-18", "Désignation": "Panneau MDF 18mm 2800x2070", "Catégorie": "Panneaux & Bois", "Quantité": 12, "Prix Unitaire HT": 42.50, "Unité": "m2"}
         ])
 
-DF_KIMAI_HISTO, LISTE_CHANTIERS, LISTE_TACHES = charger_donnees_kimai()
+DF_KIMAI_HISTO, LISTE_CHANTIERS, LISTE_TACHES_BASE = charger_donnees_kimai()
 DF_STOCK_BASE = charger_stock()
 
 # Initialisation des états en session
 if 'historique_heures' not in st.session_state:
     st.session_state['historique_heures'] = []
+
+if 'liste_taches' not in st.session_state:
+    st.session_state['liste_taches'] = LISTE_TACHES_BASE.copy()
 
 if 'stock_actuel' not in st.session_state:
     st.session_state['stock_actuel'] = DF_STOCK_BASE.copy()
@@ -205,18 +223,19 @@ menu = st.sidebar.radio(
 )
 
 # ---------------------------------------------------------
-# 1. SAISIE DES HEURES
+# 1. SAISIE DES HEURES + AJOUT MANUEL DE TÂCHE
 # ---------------------------------------------------------
 if menu == "⏱️ Saisie des Heures":
     st.header("⏱️ Saisie Rapide des Heures Atelier & Chantier")
     
+    # Formulaire principal de saisie des heures
     with st.form("form_saisie_heures", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
             date_saisie = st.date_input("Date d'intervention", datetime.now())
             chantier = st.selectbox("Chantier / Projet (issu de Kimai)", LISTE_CHANTIERS)
         with col2:
-            code_tache = st.selectbox("Tâche / Activité", LISTE_TACHES)
+            code_tache = st.selectbox("Tâche / Activité", st.session_state['liste_taches'])
             heures = st.number_input("Nombre d'heures effectuées", min_value=0.25, max_value=12.0, step=0.25, value=1.0)
             
         valider = st.form_submit_button("💾 Enregistrer l'intervention")
@@ -232,6 +251,23 @@ if menu == "⏱️ Saisie des Heures":
             })
             st.success(f"Enregistré : {heures}h sur **{chantier}** ({code_tache})")
 
+    # Section pliable pour ajouter une nouvelle tâche manuellement
+    with st.expander("➕ Ajouter une nouvelle tâche / activité personnalisée"):
+        with st.form("form_nouvelle_tache", clear_on_submit=True):
+            col_nt1, col_nt2 = st.columns([3, 1])
+            nouvelle_tache_nom = col_nt1.text_input("Nom de la nouvelle tâche (ex: Z1 - Prototype / Essai)", placeholder="Z1 - Maquette d'essai")
+            btn_add_tache = col_nt2.form_submit_button("➕ Ajouter la tâche")
+            
+            if btn_add_tache and nouvelle_tache_nom.strip():
+                nom_clean = nouvelle_tache_nom.strip()
+                if nom_clean not in st.session_state['liste_taches']:
+                    st.session_state['liste_taches'].append(nom_clean)
+                    st.session_state['liste_taches'] = sorted(st.session_state['liste_taches'])
+                    st.success(f"Tâche **'{nom_clean}'** ajoutée à la liste !")
+                    st.rerun()
+                else:
+                    st.warning("Cette tâche existe déjà dans la liste.")
+
     st.subheader("📋 Saisies de la session en cours")
     if st.session_state['historique_heures']:
         st.dataframe(pd.DataFrame(st.session_state['historique_heures']), use_container_width=True)
@@ -239,7 +275,7 @@ if menu == "⏱️ Saisie des Heures":
         st.info("Aucune saisie effectuée au cours de la session active.")
 
 # ---------------------------------------------------------
-# 2. SUIVI TEMPS & HISTORIQUE KIMAI (2025-2026)
+# 2. SUIVI TEMPS & HISTORIQUE KIMAI
 # ---------------------------------------------------------
 elif menu == "📊 Suivi Temps & Historique Kimai":
     st.header("📊 Historique Kimai Cumulé (2025 - 2026)")
