@@ -85,14 +85,10 @@ def charger_donnees_kimai_heures():
                     if val == "nan" or not val:
                         continue
                     
-                    # 1. Si la ligne est le chantier officiel (ex: OE 26/... ou 26/...)
+                    # Détection du nom de chantier
                     if any(val.startswith(p) for p in ["OE ", "25/", "26/", "Agencement"]):
                         projet_actuel = val
-                    
-                    # 2. Si c'est une ligne de tâche sous le chantier (avec des heures)
                     elif total_heures > 0:
-                        # On vérifie que ce n'est pas la ligne d'en-tête client située juste avant/après
-                        # Une ligne de tâche n'est pas le nom du chantier actuel
                         donnees_cumulees.append({
                             "Projet": projet_actuel,
                             "Tâche": val.replace('\t', ' - ').strip(),
@@ -104,8 +100,6 @@ def charger_donnees_kimai_heures():
     df_kimai = pd.DataFrame(donnees_cumulees)
     
     if not df_kimai.empty:
-        # Filtrer la ligne de sous-total client si elle a été affectée au "Général" ou au projet
-        # On supprime uniquement les tâches dont le nom ne contient aucun code d'activité et qui correspondent à des sous-totaux
         def est_production(tache):
             t = str(tache).upper()
             return not (t.startswith("X") or "BUREAU" in t or "DEVIS" in t or "RDV" in t)
