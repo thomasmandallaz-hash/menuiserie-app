@@ -88,11 +88,11 @@ def generer_pdf_etiquettes(df_a_imprimer):
     w_label = 63.5 * mm
     h_label = 38.1 * mm
     
-    # Réglage des marges compensé pour décalage imprimante
-    margin_x = 7.2 * mm       # Marge gauche standard (conservation de l'avant-dernier code)
-    margin_y = 11.1 * mm      # Marge haute réduite de 4mm pour compenser les 19mm mesurés à l'impression
-    gap_x = 2.5 * mm          # Espace horizontal
-    gap_y = 0.0 * mm          # Espace vertical
+    # Réglage des marges et répartition de la différence sur les 6 intervalles horizontaux
+    margin_x = 7.2 * mm       # Marge gauche standard
+    margin_y = 11.1 * mm      # Marge haute théorique (donne 15 mm réels)
+    gap_x = 2.5 * mm          # Espace horizontal entre colonnes
+    gap_y = 1.167 * mm        # Espace vertical rajouté (7 mm / 6 intervalles)
     
     cols = 3
     rows = 7
@@ -104,7 +104,7 @@ def generer_pdf_etiquettes(df_a_imprimer):
         ref = str(row['Réf'])
         designation = str(row['Désignation'])
         
-        # Position du coin inférieur gauche de l'étiquette
+        # Position du coin inférieur gauche de l'étiquette avec l'interligne compensé
         x = margin_x + col_idx * (w_label + gap_x)
         y = page_height - margin_y - (row_idx + 1) * h_label - row_idx * gap_y
         
