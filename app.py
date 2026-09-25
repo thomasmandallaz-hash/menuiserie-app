@@ -27,30 +27,64 @@ st.set_page_config(
 # ---------------------------------------------------------
 @st.cache_data
 def charger_donnees_kimai():
-    # 1. Recherche automatique du fichier d'activités/tâches Kimai
-    fichier_activites = None
-    fichiers_act_trouves = glob.glob("kimai-activities*.xlsx")
-    if fichiers_act_trouves:
-        fichier_activites = fichiers_act_trouves[0]
+    # 1. Recherche automatique de TOUS les fichiers d'activités / tâches
+    fichiers_act_trouves = (
+        glob.glob("*activit*.xlsx") + 
+        glob.glob("*tache*.xlsx") + 
+        glob.glob("*task*.xlsx") +
+        glob.glob("kimai*.xlsx")
+    )
+    # Supprimer les doublons
+    fichiers_act_trouves = list(set(fichiers_act_trouves))
 
     taches_uniques = []
-    if fichier_activites and os.path.exists(fichier_activites):
-        try:
-            df_act = pd.read_excel(fichier_activites)
-            if "Nom" in df_act.columns:
-                taches_raw = df_act["Nom"].dropna().astype(str).tolist()
-                taches_uniques = [t.replace('\t', ' - ').strip() for t in taches_raw]
-        except Exception as e:
-            st.error(f"Erreur lors de la lecture du fichier d'activités : {e}")
+    
+    for fichier_activites in fichiers_act_trouves:
+        # Éviter de lire les fichiers d'export d'heures comme liste de tâches
+        if "export" in fichier_activites.lower():
+            continue
+            
+        if os.path.exists(fichier_activites):
+            try:
+                df_act = pd.read_excel(fichier_activites)
+                
+                # Recherche flexible de la colonne contenant le nom des tâches
+                col_nom = None
+                for col in df_act.columns:
+                    col_str = str(col).strip().lower()
+                    if col_str in ["nom", "name", "activité", "activite", "tâche", "tache", "label", "title"]:
+                        col_nom = col
+                        break
+                
+                # Si aucune colonne explicite n'est trouvée, prendre la 1ère colonne texte
+                if col_nom is None and not df_act.empty:
+                    col_nom = df_act.columns[0]
 
+                if col_nom:
+                    taches_raw = df_act[col_nom].dropna().astype(str).tolist()
+                    taches_clean = [
+                        t.replace('\t', ' - ').strip() 
+                        for t in taches_raw 
+                        if t.strip() and t.strip().lower() != "nan" and t.strip() != str(col_nom)
+                    ]
+                    taches_uniques.extend(taches_clean)
+            except Exception as e:
+                st.error(f"Erreur lors de la lecture de {fichier_activites} : {e}")
+
+    # Nettoyage et suppression des doublons
+    taches_uniques = sorted(list(set(taches_uniques)))
+
+    # Secours si aucune tâche n'a été extraite
     if not taches_uniques:
         taches_uniques = [
             "M1 - Montage (cadrage)", "D2 - Débit massif", "P1 - Pose sur chantier", 
             "X5 - Bureau", "T1 - Trajet", "N1 - Nettoyage atelier"
         ]
 
-    # 2. Recherche automatique de tous les exports d'heures Kimai (kimai-export*.xlsx)
-    fichiers_kimai = glob.glob("kimai-export*.xlsx")
+    # 2. Recherche automatique de tous les exports d'heures Kimai
+    fichiers_kimai = glob.glob("kimai-export*.xlsx") + glob.glob("*export*.xlsx")
+    fichiers_kimai = list(set(fichiers_kimai))
+    
     donnees_cumulees = []
     
     for fichier in fichiers_kimai:
@@ -236,7 +270,6 @@ menu = st.sidebar.radio(
 if menu == "⏱️ Saisie des Heures":
     st.header("⏱️ Saisie Rapide des Heures Atelier & Chantier")
     
-    # Formulaire principal de saisie des heures
     with st.form("form_saisie_heures", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
@@ -259,7 +292,6 @@ if menu == "⏱️ Saisie des Heures":
             })
             st.success(f"Enregistré : {heures}h sur **{chantier}** ({code_tache})")
 
-    # Section pliable pour ajouter une nouvelle tâche manuellement
     with st.expander("➕ Ajouter une nouvelle tâche / activité personnalisée"):
         with st.form("form_nouvelle_tache", clear_on_submit=True):
             col_nt1, col_nt2 = st.columns([3, 1])
