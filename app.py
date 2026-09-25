@@ -84,15 +84,15 @@ def generer_pdf_etiquettes(df_a_imprimer):
     c = canvas.Canvas(buffer, pagesize=A4)
     page_height = 297 * mm
     
-    # Dimensions exactes de l'étiquette en portrait
+    # Dimensions exactes de l'étiquette Avery
     w_label = 33.5 * mm
     h_label = 38.1 * mm
     
-    # Grille et marges d'impression
-    margin_x = 7.0 * mm
-    margin_y = 15.0 * mm
-    gap_x = 3.0 * mm
-    gap_y = 2.0 * mm
+    # Réglage précis de la grille pour planche A4 (3 colonnes x 7 lignes)
+    margin_x = 7.0 * mm       # Marge gauche
+    margin_y = 8.5 * mm       # Marge haute exacte
+    gap_x = 3.0 * mm          # Espace horizontal entre étiquettes
+    gap_y = 2.0 * mm          # Espace vertical entre étiquettes
     
     cols = 3
     rows = 7
@@ -104,37 +104,41 @@ def generer_pdf_etiquettes(df_a_imprimer):
         ref = str(row['Réf'])
         designation = str(row['Désignation'])
         
-        # Coordonnées du coin inférieur gauche de l'étiquette
+        # Position du coin inférieur gauche de l'étiquette courante
         x = margin_x + col_idx * (w_label + gap_x)
         y = page_height - margin_y - (row_idx + 1) * h_label - row_idx * gap_y
         
-        # Génération du QR Code sous forme d'image PIL
+        # Optionnel : contour léger pour vérifier l'alignement à l'impression
+        c.setStrokeColorRGB(0.8, 0.8, 0.8)
+        c.setLineWidth(0.2)
+        c.rect(x, y, w_label, h_label)
+        
+        # Generer le QR Code
         qr = qrcode.QRCode(box_size=2, border=1)
         qr.add_data(ref)
         qr.make(fit=True)
         img_qr = qr.make_image(fill_color="black", back_color="white").get_image()
-        
-        # Conversion pour ReportLab
         qr_image_reader = ImageReader(img_qr)
         
-        # 1. Dessin du QR Code centré en haut de l'étiquette
-        qr_size = 20 * mm
+        # 1. QR Code dimensionné et centré en haut de la case
+        qr_size = 18 * mm
         qr_x = x + (w_label - qr_size) / 2
-        qr_y = y + h_label - qr_size - 2 * mm
+        qr_y = y + h_label - qr_size - 1.5 * mm
         c.drawImage(qr_image_reader, qr_x, qr_y, width=qr_size, height=qr_size)
         
-        # 2. Référence en gras sous le QR Code
-        c.setFont("Helvetica-Bold", 7.5)
-        text_y_ref = qr_y - 4 * mm
+        # 2. Référence sous le QR Code
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("Helvetica-Bold", 7)
+        text_y_ref = qr_y - 3.5 * mm
         c.drawCentredString(x + w_label / 2, text_y_ref, ref[:16])
         
-        # 3. Désignation en texte plus fin sous la référence
+        # 3. Désignation sous la référence
         if designation and designation != ref:
-            c.setFont("Helvetica", 6)
-            text_y_des = text_y_ref - 3.5 * mm
-            c.drawCentredString(x + w_label / 2, text_y_des, designation[:20])
+            c.setFont("Helvetica", 5.5)
+            text_y_des = text_y_ref - 3.0 * mm
+            c.drawCentredString(x + w_label / 2, text_y_des, designation[:22])
         
-        # Progression dans la grille 3x7
+        # Navigation dans la grille
         col_idx += 1
         if col_idx >= cols:
             col_idx = 0
@@ -339,4 +343,3 @@ elif menu == "🏷️ Impression Étiquettes Stock":
             file_name="etiquettes_quincaillerie_avery.pdf",
             mime="application/pdf"
         )
-        
