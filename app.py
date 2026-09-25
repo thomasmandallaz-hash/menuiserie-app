@@ -85,28 +85,27 @@ def charger_donnees_kimai_heures():
                     if val == "nan" or not val:
                         continue
                     
-                    # Détection du chantier / projet
+                    # 1. Si la ligne est le chantier officiel (ex: OE 26/... ou 26/...)
                     if any(val.startswith(p) for p in ["OE ", "25/", "26/", "Agencement"]):
                         projet_actuel = val
-                    else:
-                        if total_heures > 0:
-                            donnees_cumulees.append({
-                                "Projet": projet_actuel,
-                                "Tâche": val.replace('\t', ' - ').strip(),
-                                "Heures": total_heures
-                            })
+                    
+                    # 2. Si c'est une ligne de tâche sous le chantier (avec des heures)
+                    elif total_heures > 0:
+                        # On vérifie que ce n'est pas la ligne d'en-tête client située juste avant/après
+                        # Une ligne de tâche n'est pas le nom du chantier actuel
+                        donnees_cumulees.append({
+                            "Projet": projet_actuel,
+                            "Tâche": val.replace('\t', ' - ').strip(),
+                            "Heures": total_heures
+                        })
             except Exception:
                 pass
 
     df_kimai = pd.DataFrame(donnees_cumulees)
     
     if not df_kimai.empty:
-        # RÈGLE DE FILTRAGE STRICTE :
-        # Une tâche valide commence OBLIGATOIREMENT par une lettre suivie d'un chiffre (ex: C2, D1, T1, U1, X5...)
-        # Cela élimine d'un coup tous les noms de clients comme "SAMBA Pascal" sans toucher à tes heures.
-        pattern_tache_valide = r'^[A-Za-z][0-9]'
-        df_kimai = df_kimai[df_kimai["Tâche"].str.contains(pattern_tache_valide, regex=True, na=False)]
-        
+        # Filtrer la ligne de sous-total client si elle a été affectée au "Général" ou au projet
+        # On supprime uniquement les tâches dont le nom ne contient aucun code d'activité et qui correspondent à des sous-totaux
         def est_production(tache):
             t = str(tache).upper()
             return not (t.startswith("X") or "BUREAU" in t or "DEVIS" in t or "RDV" in t)
@@ -117,7 +116,6 @@ def charger_donnees_kimai_heures():
         projets_uniques = ["OE 26/10 fabrication meuble enceinte", "26/221 Fabrication et pose d'étagères", "26/227 Réfection plan de travail"]
 
     return df_kimai, projets_uniques
-
 @st.cache_data
 def charger_stock():
     fichiers_inv = glob.glob("*stock*.xlsx") + glob.glob("*Inventaire*.xlsx")
