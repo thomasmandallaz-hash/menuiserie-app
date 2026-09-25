@@ -1,9 +1,3 @@
-Pas de problème, je te tutoie désormais !
-
-Voici le code complet et mis à jour de l'application app.py. J'y ai intégré la solution B avec la recherche automatique des fichiers Kimai (grâce à glob), ainsi que l'ajout manuel de tâches dans le module de saisie des heures.
-
-Code complet app.py
-Python
 import streamlit as st
 import pandas as pd
 from datetime import datetime
