@@ -383,49 +383,90 @@ elif menu == "⏱️ Saisie des Heures":
             st.success(f"Enregistré : {heures}h sur {chantier}")
 
 # ---------------------------------------------------------
-# 3. SUIVI TEMPS & RENTABILITE CHANTIER
+# 3. SUIVI TEMPS & RENTABILITE CHANTIER AVEC TAUX HORAIRES
 # ---------------------------------------------------------
 elif menu == "📊 Suivi Temps & Rentabilité Chantier":
-    st.header("📊 Suivi Temps & Rentabilité par Chantier")
-    
-    # Zone d'importation du fichier Excel Kimai propre
-    with st.expander("📁 Importer un nouvel export d'heures Kimai (.xlsx)", expanded=False):
-        fichier_excel = st.file_uploader("Glissez votre fichier d'export Kimai ici :", type=["xlsx", "xls"])
-        if fichier_excel is not None:
-            df_k, proj_k = charger_donnees_kimai_heures(fichier_excel)
-            st.success("Fichier d'heures rechargé avec succès !")
-        else:
-            df_k = DF_KIMAI_HISTO.copy()
+  st.header("📊 Suivi Temps & Rentabilité par Chantier")
 
-    df_global = df_k.copy()
-    if st.session_state['historique_heures']:
-        df_sess = pd.DataFrame(st.session_state['historique_heures'])
-        df_sess.rename(columns={"Chantier": "Projet", "Code": "Tâche"}, inplace=True)
-        df_global = pd.concat([df_global, df_sess[["Projet", "Tâche", "Heures", "Production"]]], ignore_index=True)
+  # --- 1. PARAMÈTRES DES TAUX (Modifiables d'une année sur l'autre) ---
+  with st.expander(
+      "⚙️ Paramétrer les Taux Horaires par défaut (Évolution annuelle)"
+  ):
+    col_t1, col_t2 = st.columns(2)
+    taux_u5 = col_t1.number_input(
+        "Taux Machine U5 / Usinage CN (€/h) :",
+        min_value=0.0,
+        value=110.0,
+        step=5.0,
+    )
+    taux_standard = col_t2.number_input(
+        "Taux Standard Atelier / Pose / Autres (€/h) :",
+        min_value=0.0,
+        value=75.0,
+        step=5.0,
+    )
 
-    liste_projets = sorted(df_global["Projet"].unique().tolist()) if not df_global.empty else st.session_state['liste_chantiers']
-    
-    projet_sel = st.selectbox("🎯 Choisir le chantier :", liste_projets)
-    df_proj = df_global[df_global["Projet"] == projet_sel].copy()
-    
-    if not df_proj.empty:
-        total_h = df_proj["Heures"].sum()
-        h_prod = df_proj[df_proj["Production"] == True]["Heures"].sum()
-        h_bureau = df_proj[df_proj["Production"] == False]["Heures"].sum()
-        
-        c_h1, c_h2, c_h3 = st.columns(3)
-        c_h1.metric("⏱️ Total Heures Passées", f"{total_h:,.2f} h")
-        c_h2.metric("🔨 Production", f"{h_prod:,.2f} h")
-        c_h3.metric("✏️ Etudes / Bureau", f"{h_bureau:,.2f} h")
-        
-        if total_h > 0:
-            st.subheader("📉 Répartition des heures")
-            st.bar_chart(df_proj.groupby("Tâche")["Heures"].sum())
-            
-        with st.expander("📄 Voir le détail de toutes les lignes d'heures brutes"):
-            st.dataframe(df_proj, use_container_width=True)
-    else:
-        st.info("Aucune heure enregistrée pour ce chantier.")
+  # Choix du chantier
+  projet_sel = st.selectbox("🎯 Choisir le chantier :", liste_projets)
+  df_proj = df_global[df_global["Projet"] == projet_sel].copy()
+
+  if not df_proj.empty:
+
+    # --- 2. FONCTION D'ATTRIBUTION DU TAUX ---
+    def attribuer_taux(tache):
+      t = str(tache).upper()
+      if "U5" in t or "CN" in t or "USINAGE" in t:
+        return float(taux_u5)
+      return float(taux_standard)
+
+    # Préparation du tableau récapitulatif par tâche
+    df_recap = df_proj.groupby("Tâche", as_index=False)["Heures"].sum()
+    df_recap["Taux (€/h)"] = df_recap["Tâche"].apply(attribuer_taux)
+
+    st.subheader("🛠️ Détail des temps et coûts de main-d'œuvre")
+    st.caption(
+        "💡 Vous pouvez modifier directement les **Heures** ou les **Taux"
+        " (€/h)** dans le tableau ci-dessous si besoin."
+    )
+
+    # --- 3. TABLEAU ÉDITABLE DIRECTEMENT ---
+    df_edite = st.data_editor(
+        df_recap,
+        column_config={
+            "Tâche": st.column_config.TextColumn(
+                "Tâche / Activité", disabled=True
+            ),
+            "Heures": st.column_config.NumberColumn(
+                "Heures passées (h)", format="%.2f h", min_value=0.0, step=0.25
+            ),
+            "Taux (€/h)": st.column_config.NumberColumn(
+                "Taux Horaire (€)", format="%.2f €", min_value=0.0, step=1.0
+            ),
+        },
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    # Recalcul des totaux en direct à partir des valeurs éditées
+    df_edite["Coût Total (€)"] = df_edite["Heures"] * df_edite["Taux (€/h)"]
+
+    total_h = df_edite["Heures"].sum()
+    cout_total_mo = df_edite["Coût Total (€)"].sum()
+    taux_moyen = cout_total_mo / total_h if total_h > 0 else 0.0
+
+    # --- 4. INDICATEURS CLÉS ---
+    st.divider()
+    c_m1, c_m2, c_m3 = st.columns(3)
+    c_m1.metric("⏱️ Total Heures Réelles", f"{total_h:,.2f} h")
+    c_m2.metric("💰 Coût Total Main-d'œuvre", f"{cout_total_mo:,.2f} €")
+    c_m3.metric("📊 Taux Moyen Chantier", f"{taux_moyen:,.2f} €/h")
+
+    # --- 5. GRAPHIQUE DE RÉPARTITION DES COÛTS ---
+    st.subheader("📈 Répartition du coût par activité")
+    st.bar_chart(df_edite.set_index("Tâche")["Coût Total (€)"])
+
+  else:
+    st.info("Aucune heure enregistrée pour ce chantier.")
 
 # ---------------------------------------------------------
 # 4. STOCK & MOUVEMENTS
