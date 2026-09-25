@@ -4,4 +4,4 @@ openpyxl
 reportlab
 qrcode
 Pillow
-pyzbar
+zxing-cpp
