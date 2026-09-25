@@ -67,6 +67,10 @@ def charger_activites_souche():
 def charger_donnees_kimai_heures():
     fichiers_kimai = list(set(glob.glob("kimai-export*.xlsx") + glob.glob("*export*.xlsx")))
     donnees_cumulees = []
+    
+    # Charger la liste des tâches officielles pour valider ce qui est une vraie tâche
+    taches_valides = charger_activites_souche()
+    
     for fichier in fichiers_kimai:
         if os.path.exists(fichier) and "activit" not in fichier.lower():
             try:
@@ -81,7 +85,12 @@ def charger_donnees_kimai_heures():
                         total_heures = 0.0
                     if val == "nan" or not val:
                         continue
-                    if any(val.startswith(p) for p in ["OE ", "25/", "26/", "Agencement"]):
+                    
+                    # Si la ligne est un projet/client Kimai (ne commence pas par un code tâche type C1, D2, T1, etc.)
+                    # Ou si la valeur correspond à un identifiant de projet
+                    est_tache_connue = any(val.startswith(t.split(' - ')[0]) for t in taches_valides if ' - ' in t)
+                    
+                    if not est_tache_connue and (total_heures == 0 or any(val.startswith(p) for p in ["OE ", "25/", "26/", "Agencement"]) or not val[0].isdigit()):
                         projet_actuel = val
                     else:
                         donnees_cumulees.append({
