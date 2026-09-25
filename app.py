@@ -366,6 +366,7 @@ elif menu == "⏱️ Saisie des Heures":
 # ---------------------------------------------------------
 elif menu == "📊 Suivi Temps & Rentabilité Chantier":
     st.header("📊 Suivi Temps & Rentabilité par Chantier")
+    
     df_global = DF_KIMAI_HISTO.copy()
     if st.session_state['historique_heures']:
         df_sess = pd.DataFrame(st.session_state['historique_heures'])
@@ -373,20 +374,36 @@ elif menu == "📊 Suivi Temps & Rentabilité Chantier":
         df_global = pd.concat([df_global, df_sess[["Projet", "Tâche", "Heures", "Production"]]], ignore_index=True)
 
     projet_sel = st.selectbox("🎯 Choisir le chantier :", st.session_state['liste_chantiers'])
-    df_proj = df_global[df_global["Projet"] == projet_sel]
+    df_proj = df_global[df_global["Projet"] == projet_sel].copy()
     
-    total_h = df_proj["Heures"].sum() if not df_proj.empty else 0.0
-    h_prod = df_proj[df_proj["Production"] == True]["Heures"].sum() if not df_proj.empty else 0.0
-    h_bureau = df_proj[df_proj["Production"] == False]["Heures"].sum() if not df_proj.empty else 0.0
-    
-    c_h1, c_h2, c_h3 = st.columns(3)
-    c_h1.metric("⏱️ Total Heures Passées", f"{total_h:,.2f} h")
-    c_h2.metric("🔨 Production", f"{h_prod:,.2f} h")
-    c_h3.metric("✏️ Etudes / Bureau", f"{h_bureau:,.2f} h")
-    
-    if not df_proj.empty and total_h > 0:
-        st.subheader("📉 Répartition des heures")
-        st.bar_chart(df_proj.groupby("Tâche")["Heures"].sum())
+    if not df_proj.empty:
+        # Filtre optionnel pour masquer les éléments parasites sans altérer les données brutes
+        taches_dispo = df_proj["Tâche"].unique().tolist()
+        taches_selectionnees = st.multiselect(
+            "🔎 Tâches à inclure dans l'affichage :", 
+            options=taches_dispo, 
+            default=taches_dispo
+        )
+        
+        df_filtr = df_proj[df_proj["Tâche"].isin(taches_selectionnees)]
+        
+        total_h = df_filtr["Heures"].sum()
+        h_prod = df_filtr[df_filtr["Production"] == True]["Heures"].sum()
+        h_bureau = df_filtr[df_filtr["Production"] == False]["Heures"].sum()
+        
+        c_h1, c_h2, c_h3 = st.columns(3)
+        c_h1.metric("⏱️ Total Heures Passées", f"{total_h:,.2f} h")
+        c_h2.metric("🔨 Production", f"{h_prod:,.2f} h")
+        c_h3.metric("✏️ Etudes / Bureau", f"{h_bureau:,.2f} h")
+        
+        if total_h > 0:
+            st.subheader("📉 Répartition des heures")
+            st.bar_chart(df_filtr.groupby("Tâche")["Heures"].sum())
+            
+        with st.expander("📄 Voir le détail de toutes les lignes d'heures brutes"):
+            st.dataframe(df_proj, use_container_width=True)
+    else:
+        st.info("Aucune heure enregistrée pour ce chantier.")
 
 # ---------------------------------------------------------
 # 4. STOCK & MOUVEMENTS
