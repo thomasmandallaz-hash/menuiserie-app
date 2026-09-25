@@ -88,8 +88,8 @@ def generer_pdf_etiquettes(df_a_imprimer):
     w_label = 63.5 * mm
     h_label = 38.1 * mm
     
-    # Grille et marges standard pour Avery 3x7 sur A4
-    margin_x = 7.2 * mm       # Marge gauche
+    # Réglage des marges : Marge gauche réduite à 3.5 mm (moitié moins)
+    margin_x = 3.5 * mm       # Marge gauche ajustée
     margin_y = 15.1 * mm      # Marge haute
     gap_x = 2.5 * mm          # Espace horizontal
     gap_y = 0.0 * mm          # Espace vertical
@@ -108,7 +108,7 @@ def generer_pdf_etiquettes(df_a_imprimer):
         x = margin_x + col_idx * (w_label + gap_x)
         y = page_height - margin_y - (row_idx + 1) * h_label - row_idx * gap_y
         
-        # Contour très léger de repère
+        # Contour très léger de repère pour vérification
         c.setStrokeColorRGB(0.85, 0.85, 0.85)
         c.setLineWidth(0.2)
         c.rect(x, y, w_label, h_label)
@@ -120,7 +120,7 @@ def generer_pdf_etiquettes(df_a_imprimer):
         img_qr = qr.make_image(fill_color="black", back_color="white").get_image()
         qr_image_reader = ImageReader(img_qr)
         
-        # 1. QR Code centré en haut de l'étiquette élargie
+        # 1. QR Code centré en haut de l'étiquette
         qr_size = 21 * mm
         qr_x = x + (w_label - qr_size) / 2
         qr_y = y + h_label - qr_size - 2.0 * mm
