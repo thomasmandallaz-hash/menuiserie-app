@@ -1,8 +1,15 @@
+Pas de problème, je te tutoie désormais !
+
+Voici le code complet et mis à jour de l'application app.py. J'y ai intégré la solution B avec la recherche automatique des fichiers Kimai (grâce à glob), ainsi que l'ajout manuel de tâches dans le module de saisie des heures.
+
+Code complet app.py
+Python
 import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
 import io
+import glob
 
 # Bibliothèques pour la génération de PDF et de QR Codes
 from reportlab.lib.pagesizes import A4
@@ -22,15 +29,18 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# CHARGEMENT ET FUSION DES DONNÉES KIMAI (Projets + Activités)
+# CHARGEMENT ET FUSION DYNAMIQUE DES DONNÉES KIMAI
 # ---------------------------------------------------------
 @st.cache_data
 def charger_donnees_kimai():
-    # 1. Chargement de la liste des activités Kimai
-    fichier_activites = "kimai-activities_20260925104009.xlsx"
+    # 1. Recherche automatique du fichier d'activités/tâches Kimai
+    fichier_activites = None
+    fichiers_act_trouves = glob.glob("kimai-activities*.xlsx")
+    if fichiers_act_trouves:
+        fichier_activites = fichiers_act_trouves[0]
+
     taches_uniques = []
-    
-    if os.path.exists(fichier_activites):
+    if fichier_activites and os.path.exists(fichier_activites):
         try:
             df_act = pd.read_excel(fichier_activites)
             if "Nom" in df_act.columns:
@@ -45,12 +55,8 @@ def charger_donnees_kimai():
             "X5 - Bureau", "T1 - Trajet", "N1 - Nettoyage atelier"
         ]
 
-    # 2. Chargement de l'historique d'heures (2025 + 2026)
-    fichiers_kimai = [
-        "kimai-export-user-yearly_20260925103809.xlsx",     # 2025
-        "kimai-export-user-yearly_20260925103809 (1).xlsx" # 2026
-    ]
-    
+    # 2. Recherche automatique de tous les exports d'heures Kimai (kimai-export*.xlsx)
+    fichiers_kimai = glob.glob("kimai-export*.xlsx")
     donnees_cumulees = []
     
     for fichier in fichiers_kimai:
@@ -106,27 +112,35 @@ def charger_donnees_kimai():
 # Chargement du Stock
 @st.cache_data
 def charger_stock():
-    if os.path.exists("Inventaire stock .xlsx"):
-        df_inv = pd.read_excel("Inventaire stock .xlsx", sheet_name="Inventaire pour bilan 2025")
-        df_inv = df_inv.dropna(subset=[df_inv.columns[0]])
-        df_inv.columns = ["Désignation", "Quantité", "Prix Unitaire HT", "Unité", "Total HT", "Col6", "Col7"][:len(df_inv.columns)]
-        df_inv = df_inv[df_inv["Désignation"] != "Désignation"]
-        df_inv["Réf"] = df_inv["Désignation"].str.replace(r'[^a-zA-Z0-9\s-]', '', regex=True).str.strip().str.replace(' ', '-')
-        
-        def categoriser(row):
-            des = str(row["Désignation"]).lower()
-            unite = str(row["Unité"]).lower()
-            if any(k in des for k in ["panneau", "mdf", "cp", "contreplaqué", "mélaminé", "chêne", "sapin", "avive", "dalle", "planche"]) or "m2" in unite or "m²" in unite:
-                return "Panneaux & Bois"
-            return "Quincaillerie"
+    fichier_inv = None
+    fichiers_inv_trouves = glob.glob("*stock*.xlsx") + glob.glob("*Inventaire*.xlsx")
+    if fichiers_inv_trouves:
+        fichier_inv = fichiers_inv_trouves[0]
+
+    if fichier_inv and os.path.exists(fichier_inv):
+        try:
+            df_inv = pd.read_excel(fichier_inv, sheet_name="Inventaire pour bilan 2025")
+            df_inv = df_inv.dropna(subset=[df_inv.columns[0]])
+            df_inv.columns = ["Désignation", "Quantité", "Prix Unitaire HT", "Unité", "Total HT", "Col6", "Col7"][:len(df_inv.columns)]
+            df_inv = df_inv[df_inv["Désignation"] != "Désignation"]
+            df_inv["Réf"] = df_inv["Désignation"].str.replace(r'[^a-zA-Z0-9\s-]', '', regex=True).str.strip().str.replace(' ', '-')
             
-        df_inv["Catégorie"] = df_inv.apply(categoriser, axis=1)
-        return df_inv[["Réf", "Désignation", "Catégorie", "Quantité", "Prix Unitaire HT", "Unité"]].dropna(subset=["Désignation"])
-    else:
-        return pd.DataFrame([
-            {"Réf": "VIS-3x10", "Désignation": "VIS 3x10 BZ", "Catégorie": "Quincaillerie", "Quantité": 150, "Prix Unitaire HT": 0.05, "Unité": "U"},
-            {"Réf": "PAN-MDF-18", "Désignation": "Panneau MDF 18mm 2800x2070", "Catégorie": "Panneaux & Bois", "Quantité": 12, "Prix Unitaire HT": 42.50, "Unité": "m2"}
-        ])
+            def categoriser(row):
+                des = str(row["Désignation"]).lower()
+                unite = str(row["Unité"]).lower()
+                if any(k in des for k in ["panneau", "mdf", "cp", "contreplaqué", "mélaminé", "chêne", "sapin", "avive", "dalle", "planche"]) or "m2" in unite or "m²" in unite:
+                    return "Panneaux & Bois"
+                return "Quincaillerie"
+                
+            df_inv["Catégorie"] = df_inv.apply(categoriser, axis=1)
+            return df_inv[["Réf", "Désignation", "Catégorie", "Quantité", "Prix Unitaire HT", "Unité"]].dropna(subset=["Désignation"])
+        except Exception:
+            pass
+
+    return pd.DataFrame([
+        {"Réf": "VIS-3x10", "Désignation": "VIS 3x10 BZ", "Catégorie": "Quincaillerie", "Quantité": 150, "Prix Unitaire HT": 0.05, "Unité": "U"},
+        {"Réf": "PAN-MDF-18", "Désignation": "Panneau MDF 18mm 2800x2070", "Catégorie": "Panneaux & Bois", "Quantité": 12, "Prix Unitaire HT": 42.50, "Unité": "m2"}
+    ])
 
 DF_KIMAI_HISTO, LISTE_CHANTIERS, LISTE_TACHES_BASE = charger_donnees_kimai()
 DF_STOCK_BASE = charger_stock()
@@ -255,7 +269,7 @@ if menu == "⏱️ Saisie des Heures":
     with st.expander("➕ Ajouter une nouvelle tâche / activité personnalisée"):
         with st.form("form_nouvelle_tache", clear_on_submit=True):
             col_nt1, col_nt2 = st.columns([3, 1])
-            nouvelle_tache_nom = col_nt1.text_input("Nom de la nouvelle tâche (ex: Z1 - Prototype / Essai)", placeholder="Z1 - Maquette d'essai")
+            nouvelle_tache_nom = col_nt1.text_input("Nom de la nouvelle tâche", placeholder="Z1 - Maquette d'essai")
             btn_add_tache = col_nt2.form_submit_button("➕ Ajouter la tâche")
             
             if btn_add_tache and nouvelle_tache_nom.strip():
@@ -278,7 +292,7 @@ if menu == "⏱️ Saisie des Heures":
 # 2. SUIVI TEMPS & HISTORIQUE KIMAI
 # ---------------------------------------------------------
 elif menu == "📊 Suivi Temps & Historique Kimai":
-    st.header("📊 Historique Kimai Cumulé (2025 - 2026)")
+    st.header("📊 Historique Kimai Cumulé")
     
     if not DF_KIMAI_HISTO.empty:
         total_prod = DF_KIMAI_HISTO[DF_KIMAI_HISTO["Production"] == True]["Heures"].sum()
@@ -286,7 +300,7 @@ elif menu == "📊 Suivi Temps & Historique Kimai":
         total_global = total_prod + total_hors_prod
         
         col_k1, col_k2, col_k3 = st.columns(3)
-        col_k1.metric("Total Heures Production (2 ans)", f"{total_prod:,.2f} h")
+        col_k1.metric("Total Heures Production", f"{total_prod:,.2f} h")
         col_k2.metric("Total Heures Hors-Prod / Bureau", f"{total_hors_prod:,.2f} h")
         col_k3.metric("Volume Total Enregistré Kimai", f"{total_global:,.2f} h")
         
