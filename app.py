@@ -60,115 +60,106 @@ def charger_activites_souche():
                         elem = f"{code} - {intitule}"
                         if elem not in taches_extraites:
                             taches_extraites.append(elem)
-        except Exception:
-            pass
+        except Exception as exc:
+            st.error(f"⚠️ Activités — impossible de lire {fichier_souche} ({exc})")
     return taches_extraites if len(taches_extraites) >= 30 else ACTIVITES_INTEGRALES.copy()
 
 @st.cache_data
+
 def charger_donnees_kimai_heures(fichier_uploade=None):
-  fichiers_kimai = []
-  if fichier_uploade is not None:
-    fichiers_kimai = [fichier_uploade]
-  else:
-    fichiers_kimai = list(
-        set(
-            glob.glob("kimai-export*.xlsx")
-            + glob.glob("*export*.xlsx")
-            + glob.glob("*.xlsx")
-        )
+    """Charge les exports Kimai sans confondre clients, chantiers et tâches.
+
+    Les exports Kimai peuvent contenir plusieurs feuilles et des lignes de
+    regroupement (client/projet). Seules les lignes d'activité codées sont
+    comptées comme des heures; les lignes non reconnues sont ignorées et
+    signalées si la lecture du fichier échoue.
+    """
+    if fichier_uploade is not None:
+        sources = [fichier_uploade]
+    else:
+        sources = sorted({
+            nom for motif in ("kimai-export*.xlsx", "*export*.xlsx", "kimai-export*.xls", "*export*.xls")
+            for nom in glob.glob(motif)
+            if "activit" not in os.path.basename(nom).lower()
+        })
+
+    donnees_cumulees = []
+    erreurs = []
+
+    # Codes d'activités Kimai: la présence du tiret est volontaire, afin de
+    # ne pas prendre un nom de client comme une tâche.
+    motif_tache = re.compile(r"^\s*(?:X|U|D|B|M|N|T|P|Q|V|C)\s*\d+\s*-\s*.+$", re.IGNORECASE)
+    # Exemples acceptés: OE25/237, OE 25/237, 25/237, Agencement ...,
+    # Chantier ..., Projet ... . Les espaces sont tolérés.
+    motif_chantier = re.compile(
+        r"^\s*(?:(?:OE\s*)?\d{2}\s*/\s*\d+|(?:agencement|chantier|projet)\b).*$",
+        re.IGNORECASE,
     )
 
-  donnees_cumulees = []
+    def texte(valeur):
+        if pd.isna(valeur):
+            return ""
+        return re.sub(r"\s+", " ", str(valeur).replace("\t", " - ")).strip()
 
-  def convertir_en_heures(valeur):
-    """Convertit n'importe quel format (décimal, chaîne, hh:mm:ss) en heures décimales."""
-    if pd.isna(valeur):
-      return 0.0
-    val_str = str(valeur).strip().replace(",", ".")
-    # Cas format HH:MM ou HH:MM:SS
-    if ":" in val_str:
-      parties = val_str.split(":")
-      try:
-        if len(parties) == 3:
-          return (
-              float(parties[0])
-              + float(parties[1]) / 60.0
-              + float(parties[2]) / 3600.0
-          )
-        elif len(parties) == 2:
-          return float(parties[0]) + float(parties[1]) / 60.0
-      except Exception:
-        return 0.0
-    try:
-      return float(val_str)
-    except ValueError:
-      return 0.0
+    def heures(valeur):
+        if pd.isna(valeur) or valeur is None:
+            return None
+        if isinstance(valeur, (int, float)) and not isinstance(valeur, bool):
+            return float(valeur)
+        brut = str(valeur).strip().replace("\u00a0", " ").replace(",", ".")
+        brut = re.sub(r"[^0-9.+-]", "", brut)
+        try:
+            return float(brut) if brut else None
+        except ValueError:
+            return None
 
-  def est_ligne_chantier(texte):
-    """Détecte les chantiers (ex: OE 25/..., OE25/..., 25/..., 26/..., Agencement...)."""
-    t = str(texte).strip()
-    if re.match(r"^(OE\s*\d{2}/|\d{2}/\d+|Agencement)", t, re.IGNORECASE):
-      return True
-    return False
-
-  for fichier in fichiers_kimai:
-    try:
-      # Chargement de toutes les feuilles éventuelles
-      excel_file = pd.ExcelFile(fichier)
-      for nom_feuille in excel_file.sheet_names:
-        df = pd.read_excel(excel_file, sheet_name=nom_feuille)
-        if df.empty or len(df.columns) < 2:
-          continue
-
-        col_nom = df.columns[0]
-        col_total = df.columns[1]
-        projet_actuel = "Général"
-
-        for idx, row in df.iterrows():
-          val = str(row[col_nom]).strip()
-          total_heures = convertir_en_heures(row[col_total])
-
-          if val == "nan" or not val or val.lower() == "total":
+    for source in sources:
+        nom_source = getattr(source, "name", str(source))
+        try:
+            xls = pd.ExcelFile(source)
+        except Exception as exc:
+            erreurs.append(f"{nom_source} : impossible d'ouvrir le fichier ({exc})")
             continue
 
-          # Si la ligne est un en-tête de chantier
-          if est_ligne_chantier(val):
-            # Harmonisation de l'espace (ex: "OE25/237" -> "OE 25/237")
-            projet_actuel = re.sub(r"^(OE)(\d)", r"\1 \2", val)
-          elif total_heures > 0:
-            # Ne pas enregistrer comme tâche si c'est un nom client sans code tâche
-            donnees_cumulees.append({
-                "Projet": projet_actuel,
-                "Tâche": val.replace("\t", " - ").strip(),
-                "Heures": total_heures,
-            })
-    except Exception:
-      pass
+        for feuille in xls.sheet_names:
+            try:
+                df = pd.read_excel(xls, sheet_name=feuille)
+                if df.shape[1] < 2:
+                    raise ValueError("moins de deux colonnes détectées")
+                col_nom, col_total = df.columns[:2]
+                projet_actuel = "Général"
+                for _, row in df.iterrows():
+                    val = texte(row[col_nom])
+                    if not val:
+                        continue
+                    total_heures = heures(row[col_total])
 
-  df_kimai = pd.DataFrame(donnees_cumulees)
+                    if motif_chantier.match(val):
+                        projet_actuel = val
+                        continue
+                    if motif_tache.match(val) and total_heures is not None and total_heures > 0:
+                        donnees_cumulees.append({
+                            "Projet": projet_actuel,
+                            "Tâche": val,
+                            "Heures": total_heures,
+                        })
+                    # Les lignes client et sous-total ne correspondant pas à
+                    # un code d'activité sont volontairement ignorées.
+            except Exception as exc:
+                erreurs.append(f"{nom_source} / feuille « {feuille} » : lecture impossible ({exc})")
 
-  if not df_kimai.empty:
+    if erreurs:
+        for message in erreurs:
+            st.error(f"⚠️ Kimai — {message}")
 
-    def est_production(tache):
-      t = str(tache).upper()
-      return not (
-          t.startswith("X")
-          or "BUREAU" in t
-          or "DEVIS" in t
-          or "RDV" in t
-          or "ETUDE" in t
-      )
+    colonnes = ["Projet", "Tâche", "Heures", "Production"]
+    df_kimai = pd.DataFrame(donnees_cumulees)
+    if df_kimai.empty:
+        df_kimai = pd.DataFrame(columns=colonnes[:3])
+    df_kimai["Production"] = ~df_kimai["Tâche"].astype(str).str.upper().str.startswith("X")
+    projets_uniques = sorted(df_kimai["Projet"].dropna().unique().tolist())
+    return df_kimai, projets_uniques
 
-    df_kimai["Production"] = df_kimai["Tâche"].apply(est_production)
-    projets_uniques = sorted(df_kimai["Projet"].unique().tolist())
-  else:
-    projets_uniques = [
-        "OE 26/10 fabrication meuble enceinte",
-        "26/221 Fabrication et pose d'étagères",
-        "26/227 Réfection plan de travail",
-    ]
-
-  return df_kimai, projets_uniques
 @st.cache_data
 def charger_stock():
     fichiers_inv = glob.glob("*stock*.xlsx") + glob.glob("*Inventaire*.xlsx")
@@ -188,8 +179,8 @@ def charger_stock():
                 
             df_inv["Catégorie"] = df_inv.apply(categoriser, axis=1)
             return df_inv[["Réf", "Désignation", "Catégorie", "Quantité", "Prix Unitaire HT", "Unité"]].dropna(subset=["Désignation"])
-        except Exception:
-            pass
+        except Exception as exc:
+            st.error(f"⚠️ Stock — impossible de lire {fichiers_inv[0]} ({exc})")
 
     return pd.DataFrame([
         {"Réf": "VIS-3x10", "Désignation": "VIS 3x10 BZ", "Catégorie": "Quincaillerie", "Quantité": 150, "Prix Unitaire HT": 0.05, "Unité": "U"},
@@ -413,142 +404,40 @@ elif menu == "⏱️ Saisie des Heures":
             st.success(f"Enregistré : {heures}h sur {chantier}")
 
 # ---------------------------------------------------------
-# 3. SUIVI TEMPS & RENTABILITE CHANTIER AVEC TAUX HORAIRES
+# 3. SUIVI TEMPS & RENTABILITE CHANTIER
 # ---------------------------------------------------------
 elif menu == "📊 Suivi Temps & Rentabilité Chantier":
-  st.header("📊 Suivi Temps & Rentabilité par Chantier")
-
-  # --- 1. CHARGEMENT ET PRÉPARATION DES DONNÉES ---
-  with st.expander(
-      "📁 Importer un nouvel export d'heures Kimai (.xlsx)", expanded=False
-  ):
-    fichier_excel = st.file_uploader(
-        "Glissez votre fichier d'export Kimai ici :", type=["xlsx", "xls"]
-    )
+    st.header("📊 Suivi Temps & Rentabilité par Chantier")
+    fichier_excel = st.file_uploader("📁 Importer un export d'heures Kimai", type=["xlsx", "xls"])
     if fichier_excel is not None:
-      df_k, proj_k = charger_donnees_kimai_heures(fichier_excel)
-      st.success("Fichier d'heures rechargé avec succès !")
+        df_kimai_importe, projets_importes = charger_donnees_kimai_heures(fichier_excel)
+        df_global = df_kimai_importe.copy()
+        if projets_importes:
+            for projet in projets_importes:
+                if projet not in st.session_state['liste_chantiers']:
+                    st.session_state['liste_chantiers'].append(projet)
     else:
-      # Si DF_KIMAI_HISTO existe, sinon DataFrame vide
-      df_k = (
-          DF_KIMAI_HISTO.copy()
-          if "DF_KIMAI_HISTO" in locals()
-          else pd.DataFrame()
-      )
+        df_global = DF_KIMAI_HISTO.copy()
+    if st.session_state['historique_heures']:
+        df_sess = pd.DataFrame(st.session_state['historique_heures'])
+        df_sess.rename(columns={"Chantier": "Projet", "Code": "Tâche"}, inplace=True)
+        df_global = pd.concat([df_global, df_sess[["Projet", "Tâche", "Heures", "Production"]]], ignore_index=True)
 
-  df_global = df_k.copy()
-  if (
-      "historique_heures" in st.session_state
-      and st.session_state["historique_heures"]
-  ):
-    df_sess = pd.DataFrame(st.session_state["historique_heures"])
-    df_sess.rename(columns={"Chantier": "Projet", "Code": "Tâche"}, inplace=True)
-    cols_existantes = [
-        c
-        for c in ["Projet", "Tâche", "Heures", "Production"]
-        if c in df_sess.columns
-    ]
-    df_global = pd.concat(
-        [df_global, df_sess[cols_existantes]], ignore_index=True
-    )
-
-  # Récupération de la liste des chantiers
-  if not df_global.empty and "Projet" in df_global.columns:
-    liste_projets = sorted(df_global["Projet"].unique().tolist())
-  elif (
-      "liste_chantiers" in st.session_state
-      and st.session_state["liste_chantiers"]
-  ):
-    liste_projets = st.session_state["liste_chantiers"]
-  else:
-    liste_projets = [
-        "OE 26/10 fabrication meuble enceinte",
-        "26/221 Fabrication et pose d'étagères",
-        "26/227 Réfection plan de travail",
-    ]
-
-  # --- 2. PARAMÈTRES DES TAUX (Modifiables d'une année sur l'autre) ---
-  with st.expander(
-      "⚙️ Paramétrer les Taux Horaires par défaut (Évolution annuelle)"
-  ):
-    col_t1, col_t2 = st.columns(2)
-    taux_u5 = col_t1.number_input(
-        "Taux Machine U5 / Usinage CN (€/h) :",
-        min_value=0.0,
-        value=110.0,
-        step=5.0,
-    )
-    taux_standard = col_t2.number_input(
-        "Taux Standard Atelier / Pose / Autres (€/h) :",
-        min_value=0.0,
-        value=75.0,
-        step=5.0,
-    )
-
-  # --- 3. CHOIX DU CHANTIER ---
-  projet_sel = st.selectbox("🎯 Choisir le chantier :", liste_projets)
-  df_proj = (
-      df_global[df_global["Projet"] == projet_sel].copy()
-      if not df_global.empty
-      else pd.DataFrame()
-  )
-
-  if not df_proj.empty:
-    # Attribution automatique du taux
-    def attribuer_taux(tache):
-      t = str(tache).upper()
-      if "U5" in t or "CN" in t or "USINAGE" in t:
-        return float(taux_u5)
-      return float(taux_standard)
-
-    # Regroupement des heures par tâche
-    df_recap = df_proj.groupby("Tâche", as_index=False)["Heures"].sum()
-    df_recap["Taux (€/h)"] = df_recap["Tâche"].apply(attribuer_taux)
-
-    st.subheader("🛠️ Détail des temps et coûts de main-d'œuvre")
-    st.caption(
-        "💡 Vous pouvez modifier directement les **Heures** ou les **Taux"
-        " (€/h)** dans le tableau ci-dessous si besoin."
-    )
-
-    # Tableau interactif
-    df_edite = st.data_editor(
-        df_recap,
-        column_config={
-            "Tâche": st.column_config.TextColumn(
-                "Tâche / Activité", disabled=True
-            ),
-            "Heures": st.column_config.NumberColumn(
-                "Heures passées (h)", format="%.2f h", min_value=0.0, step=0.25
-            ),
-            "Taux (€/h)": st.column_config.NumberColumn(
-                "Taux Horaire (€)", format="%.2f €", min_value=0.0, step=1.0
-            ),
-        },
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    # Recalcul dynamique
-    df_edite["Coût Total (€)"] = df_edite["Heures"] * df_edite["Taux (€/h)"]
-
-    total_h = df_edite["Heures"].sum()
-    cout_total_mo = df_edite["Coût Total (€)"].sum()
-    taux_moyen = cout_total_mo / total_h if total_h > 0 else 0.0
-
-    # Indicateurs chiffrés
-    st.divider()
-    c_m1, c_m2, c_m3 = st.columns(3)
-    c_m1.metric("⏱️ Total Heures Réelles", f"{total_h:,.2f} h")
-    c_m2.metric("💰 Coût Total Main-d'œuvre", f"{cout_total_mo:,.2f} €")
-    c_m3.metric("📊 Taux Moyen Chantier", f"{taux_moyen:,.2f} €/h")
-
-    # Graphique
-    st.subheader("📈 Répartition du coût par activité")
-    st.bar_chart(df_edite.set_index("Tâche")["Coût Total (€)"])
-
-  else:
-    st.info("Aucune heure enregistrée pour ce chantier.")
+    projet_sel = st.selectbox("🎯 Choisir le chantier :", st.session_state['liste_chantiers'])
+    df_proj = df_global[df_global["Projet"] == projet_sel]
+    
+    total_h = df_proj["Heures"].sum() if not df_proj.empty else 0.0
+    h_prod = df_proj[df_proj["Production"] == True]["Heures"].sum() if not df_proj.empty else 0.0
+    h_bureau = df_proj[df_proj["Production"] == False]["Heures"].sum() if not df_proj.empty else 0.0
+    
+    c_h1, c_h2, c_h3 = st.columns(3)
+    c_h1.metric("⏱️ Total Heures Passées", f"{total_h:,.2f} h")
+    c_h2.metric("🔨 Production", f"{h_prod:,.2f} h")
+    c_h3.metric("✏️ Etudes / Bureau", f"{h_bureau:,.2f} h")
+    
+    if not df_proj.empty and total_h > 0:
+        st.subheader("📉 Répartition des heures")
+        st.bar_chart(df_proj.groupby("Tâche")["Heures"].sum())
 
 # ---------------------------------------------------------
 # 4. STOCK & MOUVEMENTS
