@@ -4,6 +4,7 @@ from datetime import datetime
 import os
 import io
 import glob
+import re
 
 # Bibliothèques PDF et QR Codes
 from reportlab.lib.pagesizes import A4
