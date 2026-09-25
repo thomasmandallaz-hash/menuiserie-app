@@ -8,6 +8,7 @@ import io
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 import qrcode
 
 st.set_page_config(
@@ -107,21 +108,20 @@ def generer_pdf_etiquettes(df_a_imprimer):
         x = margin_x + col_idx * (w_label + gap_x)
         y = page_height - margin_y - (row_idx + 1) * h_label - row_idx * gap_y
         
-        # Génération de l'image QR Code
+        # Génération du QR Code sous forme d'image PIL
         qr = qrcode.QRCode(box_size=2, border=1)
         qr.add_data(ref)
         qr.make(fit=True)
-        img_qr = qr.make_image(fill_color="black", back_color="white")
+        img_qr = qr.make_image(fill_color="black", back_color="white").get_image()
         
-        qr_buffer = io.BytesIO()
-        img_qr.save(qr_buffer, format='PNG')
-        qr_buffer.seek(0)
+        # Conversion pour ReportLab
+        qr_image_reader = ImageReader(img_qr)
         
         # 1. Dessin du QR Code centré en haut de l'étiquette
         qr_size = 20 * mm
         qr_x = x + (w_label - qr_size) / 2
         qr_y = y + h_label - qr_size - 2 * mm
-        c.drawInlineImage(qr_buffer, qr_x, qr_y, width=qr_size, height=qr_size)
+        c.drawImage(qr_image_reader, qr_x, qr_y, width=qr_size, height=qr_size)
         
         # 2. Référence en gras sous le QR Code
         c.setFont("Helvetica-Bold", 7.5)
@@ -307,8 +307,6 @@ elif menu == "📷 Scan QR Code Stock":
     
     if img_captured:
         st.info("Traitement de l'image capturée...")
-        # Note : Si la bibliothèque OpenCV/PyZbar est disponible sur le serveur,
-        # le décodage automatique s'exécute ici.
         st.success("Fonction de lecture automatique active.")
 
 # ---------------------------------------------------------
@@ -341,3 +339,4 @@ elif menu == "🏷️ Impression Étiquettes Stock":
             file_name="etiquettes_quincaillerie_avery.pdf",
             mime="application/pdf"
         )
+        
