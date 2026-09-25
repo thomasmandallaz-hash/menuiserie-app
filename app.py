@@ -4,7 +4,6 @@ from datetime import datetime
 import os
 import io
 import glob
-import re
 
 # Bibliothèques PDF et QR Codes
 from reportlab.lib.pagesizes import A4
@@ -13,7 +12,10 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 import qrcode
 from PIL import Image
-import zxingcpp
+try:
+    import zxingcpp
+except ImportError:
+    zxingcpp = None
 
 st.set_page_config(
     page_title="Gestion Menuiserie", 
@@ -60,104 +62,50 @@ def charger_activites_souche():
                         elem = f"{code} - {intitule}"
                         if elem not in taches_extraites:
                             taches_extraites.append(elem)
-        except Exception as exc:
-            st.error(f"⚠️ Activités — impossible de lire {fichier_souche} ({exc})")
+        except Exception:
+            pass
     return taches_extraites if len(taches_extraites) >= 30 else ACTIVITES_INTEGRALES.copy()
 
 @st.cache_data
-
-def charger_donnees_kimai_heures(fichier_uploade=None):
-    """Charge les exports Kimai sans confondre clients, chantiers et tâches.
-
-    Les exports Kimai peuvent contenir plusieurs feuilles et des lignes de
-    regroupement (client/projet). Seules les lignes d'activité codées sont
-    comptées comme des heures; les lignes non reconnues sont ignorées et
-    signalées si la lecture du fichier échoue.
-    """
-    if fichier_uploade is not None:
-        sources = [fichier_uploade]
-    else:
-        sources = sorted({
-            nom for motif in ("kimai-export*.xlsx", "*export*.xlsx", "kimai-export*.xls", "*export*.xls")
-            for nom in glob.glob(motif)
-            if "activit" not in os.path.basename(nom).lower()
-        })
-
+def charger_donnees_kimai_heures():
+    fichiers_kimai = list(set(glob.glob("kimai-export*.xlsx") + glob.glob("*export*.xlsx")))
     donnees_cumulees = []
-    erreurs = []
-
-    # Codes d'activités Kimai: la présence du tiret est volontaire, afin de
-    # ne pas prendre un nom de client comme une tâche.
-    motif_tache = re.compile(r"^\s*(?:X|U|D|B|M|N|T|P|Q|V|C)\s*\d+\s*-\s*.+$", re.IGNORECASE)
-    # Exemples acceptés: OE25/237, OE 25/237, 25/237, Agencement ...,
-    # Chantier ..., Projet ... . Les espaces sont tolérés.
-    motif_chantier = re.compile(
-        r"^\s*(?:(?:OE\s*)?\d{2}\s*/\s*\d+|(?:agencement|chantier|projet)\b).*$",
-        re.IGNORECASE,
-    )
-
-    def texte(valeur):
-        if pd.isna(valeur):
-            return ""
-        return re.sub(r"\s+", " ", str(valeur).replace("\t", " - ")).strip()
-
-    def heures(valeur):
-        if pd.isna(valeur) or valeur is None:
-            return None
-        if isinstance(valeur, (int, float)) and not isinstance(valeur, bool):
-            return float(valeur)
-        brut = str(valeur).strip().replace("\u00a0", " ").replace(",", ".")
-        brut = re.sub(r"[^0-9.+-]", "", brut)
-        try:
-            return float(brut) if brut else None
-        except ValueError:
-            return None
-
-    for source in sources:
-        nom_source = getattr(source, "name", str(source))
-        try:
-            xls = pd.ExcelFile(source)
-        except Exception as exc:
-            erreurs.append(f"{nom_source} : impossible d'ouvrir le fichier ({exc})")
-            continue
-
-        for feuille in xls.sheet_names:
+    for fichier in fichiers_kimai:
+        if os.path.exists(fichier) and "activit" not in fichier.lower():
             try:
-                df = pd.read_excel(xls, sheet_name=feuille)
-                if df.shape[1] < 2:
-                    raise ValueError("moins de deux colonnes détectées")
-                col_nom, col_total = df.columns[:2]
+                df = pd.read_excel(fichier)
+                col_nom, col_total = df.columns[0], df.columns[1]
                 projet_actuel = "Général"
-                for _, row in df.iterrows():
-                    val = texte(row[col_nom])
-                    if not val:
+                for idx, row in df.iterrows():
+                    val = str(row[col_nom]).strip()
+                    try:
+                        total_heures = float(str(row[col_total]).replace(',', '.'))
+                    except ValueError:
+                        total_heures = 0.0
+                    if val == "nan" or not val:
                         continue
-                    total_heures = heures(row[col_total])
-
-                    if motif_chantier.match(val):
+                    if any(val.startswith(p) for p in ["OE ", "25/", "26/", "Agencement"]):
                         projet_actuel = val
-                        continue
-                    if motif_tache.match(val) and total_heures is not None and total_heures > 0:
+                    else:
                         donnees_cumulees.append({
                             "Projet": projet_actuel,
-                            "Tâche": val,
-                            "Heures": total_heures,
+                            "Tâche": val.replace('\t', ' - ').strip(),
+                            "Heures": total_heures
                         })
-                    # Les lignes client et sous-total ne correspondant pas à
-                    # un code d'activité sont volontairement ignorées.
-            except Exception as exc:
-                erreurs.append(f"{nom_source} / feuille « {feuille} » : lecture impossible ({exc})")
+            except Exception:
+                pass
 
-    if erreurs:
-        for message in erreurs:
-            st.error(f"⚠️ Kimai — {message}")
-
-    colonnes = ["Projet", "Tâche", "Heures", "Production"]
     df_kimai = pd.DataFrame(donnees_cumulees)
-    if df_kimai.empty:
-        df_kimai = pd.DataFrame(columns=colonnes[:3])
-    df_kimai["Production"] = ~df_kimai["Tâche"].astype(str).str.upper().str.startswith("X")
-    projets_uniques = sorted(df_kimai["Projet"].dropna().unique().tolist())
+    def est_production(tache):
+        t = str(tache).upper()
+        return not (t.startswith("X") or "BUREAU" in t or "DEVIS" in t or "RDV" in t)
+
+    if not df_kimai.empty:
+        df_kimai["Production"] = df_kimai["Tâche"].apply(est_production)
+        projets_uniques = sorted(df_kimai["Projet"].unique().tolist())
+    else:
+        projets_uniques = ["OE 26/10 fabrication meuble enceinte", "26/221 Fabrication et pose d'étagères", "26/227 Réfection plan de travail"]
+
     return df_kimai, projets_uniques
 
 @st.cache_data
@@ -179,8 +127,8 @@ def charger_stock():
                 
             df_inv["Catégorie"] = df_inv.apply(categoriser, axis=1)
             return df_inv[["Réf", "Désignation", "Catégorie", "Quantité", "Prix Unitaire HT", "Unité"]].dropna(subset=["Désignation"])
-        except Exception as exc:
-            st.error(f"⚠️ Stock — impossible de lire {fichiers_inv[0]} ({exc})")
+        except Exception:
+            pass
 
     return pd.DataFrame([
         {"Réf": "VIS-3x10", "Désignation": "VIS 3x10 BZ", "Catégorie": "Quincaillerie", "Quantité": 150, "Prix Unitaire HT": 0.05, "Unité": "U"},
@@ -299,7 +247,7 @@ menu = st.sidebar.radio(
         "📊 Suivi Temps & Rentabilité Chantier",
         "📦 Stock & Mouvements",
         "📷 Scan QR Code Stock",
-        "🏷️ Impression Étiquettes"
+        "🏷️ Impression Étiquettes Stock"
     ]
 )
 
@@ -408,16 +356,7 @@ elif menu == "⏱️ Saisie des Heures":
 # ---------------------------------------------------------
 elif menu == "📊 Suivi Temps & Rentabilité Chantier":
     st.header("📊 Suivi Temps & Rentabilité par Chantier")
-    fichier_excel = st.file_uploader("📁 Importer un export d'heures Kimai", type=["xlsx", "xls"])
-    if fichier_excel is not None:
-        df_kimai_importe, projets_importes = charger_donnees_kimai_heures(fichier_excel)
-        df_global = df_kimai_importe.copy()
-        if projets_importes:
-            for projet in projets_importes:
-                if projet not in st.session_state['liste_chantiers']:
-                    st.session_state['liste_chantiers'].append(projet)
-    else:
-        df_global = DF_KIMAI_HISTO.copy()
+    df_global = DF_KIMAI_HISTO.copy()
     if st.session_state['historique_heures']:
         df_sess = pd.DataFrame(st.session_state['historique_heures'])
         df_sess.rename(columns={"Chantier": "Projet", "Code": "Tâche"}, inplace=True)
@@ -451,38 +390,34 @@ elif menu == "📦 Stock & Mouvements":
 # ---------------------------------------------------------
 elif menu == "📷 Scan QR Code Stock":
     st.header("📷 Numérisation QR Code")
-    img_captured = st.camera_input("Scanner le QR Code")
-    if img_captured:
-        results = zxingcpp.read_barcodes(Image.open(img_captured))
-        if results:
-            qr_data = results[0].text.strip()
-            st.success(f"QR Code : `{qr_data}`")
+    if zxingcpp is None:
+        st.warning("La lecture automatique des QR codes n'est pas disponible sur cet hébergement. Le reste de l'application reste fonctionnel.")
+    else:
+        img_captured = st.camera_input("Scanner le QR Code")
+        if img_captured:
+            results = zxingcpp.read_barcodes(Image.open(img_captured))
+            if results:
+                qr_data = results[0].text.strip()
+                st.success(f"QR Code : `{qr_data}`")
 
 # ---------------------------------------------------------
-# 6. IMPRESSION ÉTIQUETTES STOCK
+# 6. IMPRESSION ETIQUETTES STOCK
 # ---------------------------------------------------------
 elif menu == "🏷️ Impression Étiquettes Stock":
     st.header("🏷️ Impression d'Étiquettes QR Code")
-    filtre_imp = st.selectbox("Catégorie à afficher :", ["Toutes", "Quincaillerie", "Panneaux & Bois"])
-    df_imp_base = st.session_state['stock_actuel']
-    if filtre_imp != "Toutes":
-        df_imp_base = df_imp_base[df_imp_base["Catégorie"] == filtre_imp]
-        
-    st.dataframe(df_imp_base, use_container_width=True)
-    
-    articles_selectionnes = st.multiselect(
-        "Sélectionnez les articles à imprimer sur la planche :",
-        options=df_imp_base["Réf"].tolist(),
-        default=df_imp_base["Réf"].tolist()[:3]
-    )
-    
-    if articles_selectionnes:
-        df_filtr = df_imp_base[df_imp_base["Réf"].isin(articles_selectionnes)]
-        pdf_data = generer_pdf_etiquettes(df_filtr)
-        
-        st.download_button(
-            label="📄 Télécharger la planche d'étiquettes (PDF)",
-            data=pdf_data,
-            file_name="etiquettes_quincaillerie_avery.pdf",
-            mime="application/pdf"
-        )
+    df_imp = st.session_state.get("stock_actuel", pd.DataFrame()).copy()
+
+    # Compatibilité avec les anciens inventaires : la catégorie est facultative.
+    if "Réf" not in df_imp.columns or "Désignation" not in df_imp.columns:
+        st.warning("Le stock ne contient pas les colonnes nécessaires (Réf et Désignation) pour imprimer les étiquettes.")
+    else:
+        if "Catégorie" not in df_imp.columns:
+            df_imp["Catégorie"] = "Non catégorisé"
+        filtre_imp = st.selectbox("Catégorie à afficher :", ["Toutes"] + sorted(df_imp["Catégorie"].dropna().astype(str).unique().tolist()))
+        df_imp_base = df_imp if filtre_imp == "Toutes" else df_imp[df_imp["Catégorie"].astype(str) == filtre_imp]
+        st.dataframe(df_imp_base, use_container_width=True)
+        refs = df_imp_base["Réf"].dropna().astype(str).tolist()
+        articles = st.multiselect("Sélectionner les articles à imprimer :", refs, default=refs[:3])
+        if articles:
+            pdf_data = generer_pdf_etiquettes(df_imp_base[df_imp_base["Réf"].astype(str).isin(articles)])
+            st.download_button("📄 Télécharger la planche d'étiquettes (PDF)", pdf_data, "etiquettes_quincaillerie_avery.pdf", "application/pdf")
