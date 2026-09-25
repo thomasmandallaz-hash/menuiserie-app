@@ -459,12 +459,30 @@ elif menu == "📷 Scan QR Code Stock":
             st.success(f"QR Code : `{qr_data}`")
 
 # ---------------------------------------------------------
-# 6. IMPRESSION ETIQUETTES
+# 6. IMPRESSION ÉTIQUETTES STOCK
 # ---------------------------------------------------------
-elif menu == "🏷️ Impression Étiquettes":
-    st.header("🏷️ Impression d'Étiquettes")
-    df_imp = st.session_state['stock_actuel']
-    articles = st.multiselect("Sélectionner les articles :", df_imp["Réf"].tolist(), default=df_imp["Réf"].tolist()[:3])
-    if articles:
-        pdf_data = generer_pdf_etiquettes(df_imp[df_imp["Réf"].isin(articles)])
-        st.download_button("📄 Télécharger le PDF (Avery)", pdf_data, "etiquettes.pdf", "application/pdf")
+elif menu == "🏷️ Impression Étiquettes Stock":
+    st.header("🏷️ Impression d'Étiquettes QR Code")
+    filtre_imp = st.selectbox("Catégorie à afficher :", ["Toutes", "Quincaillerie", "Panneaux & Bois"])
+    df_imp_base = st.session_state['stock_actuel']
+    if filtre_imp != "Toutes":
+        df_imp_base = df_imp_base[df_imp_base["Catégorie"] == filtre_imp]
+        
+    st.dataframe(df_imp_base, use_container_width=True)
+    
+    articles_selectionnes = st.multiselect(
+        "Sélectionnez les articles à imprimer sur la planche :",
+        options=df_imp_base["Réf"].tolist(),
+        default=df_imp_base["Réf"].tolist()[:3]
+    )
+    
+    if articles_selectionnes:
+        df_filtr = df_imp_base[df_imp_base["Réf"].isin(articles_selectionnes)]
+        pdf_data = generer_pdf_etiquettes(df_filtr)
+        
+        st.download_button(
+            label="📄 Télécharger la planche d'étiquettes (PDF)",
+            data=pdf_data,
+            file_name="etiquettes_quincaillerie_avery.pdf",
+            mime="application/pdf"
+        )
