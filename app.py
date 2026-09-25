@@ -23,72 +23,57 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# CHARGEMENT ET FUSION DYNAMIQUE DES DONNÉES KIMAI
+# CHARGEMENT DES ACTIVITÉS DEPUIS TON FICHIER "Activités.xlsx"
 # ---------------------------------------------------------
 @st.cache_data
-def charger_donnees_kimai():
-    # 1. Recherche automatique de TOUS les fichiers d'activités / tâches
-    fichiers_act_trouves = (
-        glob.glob("*activit*.xlsx") + 
-        glob.glob("*tache*.xlsx") + 
-        glob.glob("*task*.xlsx") +
-        glob.glob("kimai*.xlsx")
-    )
-    # Supprimer les doublons
-    fichiers_act_trouves = list(set(fichiers_act_trouves))
-
+def charger_activites_souche():
+    fichier_souche = "Activités.xlsx"
     taches_uniques = []
     
-    for fichier_activites in fichiers_act_trouves:
-        # Éviter de lire les fichiers d'export d'heures comme liste de tâches
-        if "export" in fichier_activites.lower():
-            continue
+    if os.path.exists(fichier_souche):
+        try:
+            df_act = pd.read_excel(fichier_souche, sheet_name="Réf")
             
-        if os.path.exists(fichier_activites):
-            try:
-                df_act = pd.read_excel(fichier_activites)
+            # Reconstruction propre des activités (Code - Libellé)
+            for idx, row in df_act.iterrows():
+                code = str(row['D1']).strip() if pd.notna(row['D1']) else ""
+                nom = str(row['Appro Débit']).strip() if pd.notna(row['Appro Débit']) else ""
                 
-                # Recherche flexible de la colonne contenant le nom des tâches
-                col_nom = None
-                for col in df_act.columns:
-                    col_str = str(col).strip().lower()
-                    if col_str in ["nom", "name", "activité", "activite", "tâche", "tache", "label", "title"]:
-                        col_nom = col
-                        break
-                
-                # Si aucune colonne explicite n'est trouvée, prendre la 1ère colonne texte
-                if col_nom is None and not df_act.empty:
-                    col_nom = df_act.columns[0]
+                if code and nom and code != "nan" and nom != "nan":
+                    taches_uniques.append(f"{code} - {nom}")
+        except Exception as e:
+            st.error(f"Erreur lors de la lecture de Activités.xlsx : {e}")
 
-                if col_nom:
-                    taches_raw = df_act[col_nom].dropna().astype(str).tolist()
-                    taches_clean = [
-                        t.replace('\t', ' - ').strip() 
-                        for t in taches_raw 
-                        if t.strip() and t.strip().lower() != "nan" and t.strip() != str(col_nom)
-                    ]
-                    taches_uniques.extend(taches_clean)
-            except Exception as e:
-                st.error(f"Erreur lors de la lecture de {fichier_activites} : {e}")
-
-    # Nettoyage et suppression des doublons
-    taches_uniques = sorted(list(set(taches_uniques)))
-
-    # Secours si aucune tâche n'a été extraite
+    # En cas d'absence du fichier, liste de secours complète des 62 activités
     if not taches_uniques:
         taches_uniques = [
-            "M1 - Montage (cadrage)", "D2 - Débit massif", "P1 - Pose sur chantier", 
-            "X5 - Bureau", "T1 - Trajet", "N1 - Nettoyage atelier"
+            "D2 - Débit massif", "D3 - Scie à ruban", "D4 - Scie à format", "D5 - Scie à Panneaux", "D6 - Scie à rubau metaux", "D7 - Scie radial",
+            "C1 - Corroyeuse 4 faces", "C2 - Dégauchissage", "C3 - Rabotage",
+            "U1 - Toupie", "U2 - Défonceuses", "U3 - Scie à ruban", "U4 - Plaqueuse", "U5 - CN", "U6 - Tournage", "U7 - Mortaisage", "U8 - Tennonage", "U9 - Pointage machine", "U10 - Usinage", "U11 - Perçage manuelle",
+            "B1 - Finition manuelle", "B2 - Ponceuse à bande", "B3 - Placage chant main", "B4 - Affleurage chants", "B5 - Vitrage", "B6 - Cassage d'arrêtes", "B7 - Brossage",
+            "M1 - Montage (cadrage)", "M2 - Montage caisses", "M3 - Collage Px", "M4 - Collage neoprene",
+            "X1 - Etude de plan", "X2 - Etablissement", "X3 - Traçage", "X4 - Affutage", "X5 - Bureau", "X6 - RDV Clientèle", "X7 - Relevé de côtes", "X8 - Mise en page devis", "X9 - Création publication réseau",
+            "V1 - Vernissage pistolet", "V2 - Laquage pistolet", "V3 - Pinceau", "V4 - Teinture", "V5 - Egrenage", "V6 - Traitement IFH",
+            "Q1 - Pose quincaillerie",
+            "N1 - Nettoyage atelier", "N2 - Rangement atelier", "N3 - Affutage", "N4 - Changement sac aspi", "N5 - Changement plaquettes",
+            "T1 - Trajet", "T2 - Chargement", "T3 - Mise au sechoir", "T4 - Emballage", "T5 - Manutention",
+            "P1 - Pose sur chantier", "P2 - Demontage", "P3 - Evacuation", "P4 - Fab gabarits", "P5 - Rangement nettoyage chantier"
         ]
 
-    # 2. Recherche automatique de tous les exports d'heures Kimai
+    return taches_uniques
+
+# ---------------------------------------------------------
+# CHARGEMENT DES EXPORTS HEURES ET DU STOCK
+# ---------------------------------------------------------
+@st.cache_data
+def charger_donnees_kimai_heures():
     fichiers_kimai = glob.glob("kimai-export*.xlsx") + glob.glob("*export*.xlsx")
     fichiers_kimai = list(set(fichiers_kimai))
     
     donnees_cumulees = []
     
     for fichier in fichiers_kimai:
-        if os.path.exists(fichier):
+        if os.path.exists(fichier) and "activit" not in fichier.lower():
             try:
                 df = pd.read_excel(fichier)
                 col_nom = df.columns[0]
@@ -118,8 +103,8 @@ def charger_donnees_kimai():
                             "Heures": total_heures,
                             "Fichier": fichier
                         })
-            except Exception as e:
-                st.error(f"Erreur lors de la lecture de {fichier} : {e}")
+            except Exception:
+                pass
 
     df_kimai = pd.DataFrame(donnees_cumulees)
     
@@ -135,9 +120,8 @@ def charger_donnees_kimai():
     else:
         projets_uniques = ["26/221 Fabrication et pose d'étagères", "26/227 Réfection plan de travail"]
 
-    return df_kimai, projets_uniques, taches_uniques
+    return df_kimai, projets_uniques
 
-# Chargement du Stock
 @st.cache_data
 def charger_stock():
     fichier_inv = None
@@ -170,7 +154,8 @@ def charger_stock():
         {"Réf": "PAN-MDF-18", "Désignation": "Panneau MDF 18mm 2800x2070", "Catégorie": "Panneaux & Bois", "Quantité": 12, "Prix Unitaire HT": 42.50, "Unité": "m2"}
     ])
 
-DF_KIMAI_HISTO, LISTE_CHANTIERS, LISTE_TACHES_BASE = charger_donnees_kimai()
+LISTE_TACHES_SOUCHE = charger_activites_souche()
+DF_KIMAI_HISTO, LISTE_CHANTIERS = charger_donnees_kimai_heures()
 DF_STOCK_BASE = charger_stock()
 
 # Initialisation des états en session
@@ -178,7 +163,7 @@ if 'historique_heures' not in st.session_state:
     st.session_state['historique_heures'] = []
 
 if 'liste_taches' not in st.session_state:
-    st.session_state['liste_taches'] = LISTE_TACHES_BASE.copy()
+    st.session_state['liste_taches'] = LISTE_TACHES_SOUCHE.copy()
 
 if 'stock_actuel' not in st.session_state:
     st.session_state['stock_actuel'] = DF_STOCK_BASE.copy()
@@ -274,9 +259,9 @@ if menu == "⏱️ Saisie des Heures":
         col1, col2 = st.columns(2)
         with col1:
             date_saisie = st.date_input("Date d'intervention", datetime.now())
-            chantier = st.selectbox("Chantier / Projet (issu de Kimai)", LISTE_CHANTIERS)
+            chantier = st.selectbox("Chantier / Projet", LISTE_CHANTIERS)
         with col2:
-            code_tache = st.selectbox("Tâche / Activité", st.session_state['liste_taches'])
+            code_tache = st.selectbox("Tâche / Activité (issue de Activités.xlsx)", st.session_state['liste_taches'])
             heures = st.number_input("Nombre d'heures effectuées", min_value=0.25, max_value=12.0, step=0.25, value=1.0)
             
         valider = st.form_submit_button("💾 Enregistrer l'intervention")
