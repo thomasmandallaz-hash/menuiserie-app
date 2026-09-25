@@ -22,11 +22,75 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# CHARGEMENT AUTOMATIQUE DES DONNÉES EXCEL
+# CHARGEMENT ET FUSION DES DONNÉES KIMAI (2025 + 2026)
 # ---------------------------------------------------------
 @st.cache_data
-def charger_donnees():
-    # Chargement du stock 2025 depuis le fichier Excel s'il existe
+def charger_donnees_kimai():
+    fichiers_kimai = [
+        "kimai-export-user-yearly_20260925103809.xlsx",     # 2025
+        "kimai-export-user-yearly_20260925103809 (1).xlsx" # 2026
+    ]
+    
+    donnees_cumulees = []
+    
+    for fichier in fichiers_kimai:
+        if os.path.exists(fichier):
+            try:
+                df = pd.read_excel(fichier)
+                col_nom = df.columns[0]
+                col_total = df.columns[1]
+                
+                projet_actuel = "Général"
+                
+                for idx, row in df.iterrows():
+                    val = str(row[col_nom]).strip()
+                    total_str = str(row[col_total]).replace(',', '.')
+                    
+                    try:
+                        total_heures = float(total_str)
+                    except ValueError:
+                        total_heures = 0.0
+                        
+                    if val == "nan" or not val:
+                        continue
+                        
+                    # Détection s'il s'agit d'un projet (commence souvent par OE, 25/, 26/ ou nom d'entreprise)
+                    # Si la ligne ne commence pas par un code de tâche classique, on la traite comme un projet
+                    if any(val.startswith(p) for p in ["OE ", "25/", "26/", "Agencement"]):
+                        projet_actuel = val
+                    else:
+                        # C'est une tâche/activité rattachée au projet actuel
+                        donnees_cumulees.append({
+                            "Projet": projet_actuel,
+                            "Tâche": val,
+                            "Heures": total_heures,
+                            "Fichier": fichier
+                        })
+            except Exception as e:
+                st.error(f"Erreur lors de la lecture de {fichier} : {e}")
+
+    df_kimai = pd.DataFrame(donnees_cumulees)
+    
+    # Séparation automatique Production vs Admin
+    def est_production(tache):
+        t = str(tache).upper()
+        if t.startswith("X") or "BUREAU" in t or "DEVIS" in t or "RDV" in t:
+            return False
+        return True
+
+    if not df_kimai.empty:
+        df_kimai["Production"] = df_kimai["Tâche"].apply(est_production)
+        projets_uniques = sorted(df_kimai["Projet"].unique().tolist())
+        taches_uniques = sorted(df_kimai["Tâche"].unique().tolist())
+    else:
+        projets_uniques = ["26/221 Fabrication et pose d'étagères", "26/227 Réfection plan de travail"]
+        taches_uniques = ["M1 - Montage atelier", "D2 - Débit bois", "P1 - Pose chantier", "X5 - Bureau / Administration"]
+
+    return df_kimai, projets_uniques, taches_uniques
+
+# Chargement du Stock
+@st.cache_data
+def charger_stock():
     if os.path.exists("Inventaire stock .xlsx"):
         df_inv = pd.read_excel("Inventaire stock .xlsx", sheet_name="Inventaire pour bilan 2025")
         df_inv = df_inv.dropna(subset=[df_inv.columns[0]])
@@ -34,7 +98,6 @@ def charger_donnees():
         df_inv = df_inv[df_inv["Désignation"] != "Désignation"]
         df_inv["Réf"] = df_inv["Désignation"].str.replace(r'[^a-zA-Z0-9\s-]', '', regex=True).str.strip().str.replace(' ', '-')
         
-        # Classification Quincaillerie vs Panneaux/Bois
         def categoriser(row):
             des = str(row["Désignation"]).lower()
             unite = str(row["Unité"]).lower()
@@ -43,106 +106,76 @@ def charger_donnees():
             return "Quincaillerie"
             
         df_inv["Catégorie"] = df_inv.apply(categoriser, axis=1)
-        df_stock = df_inv[["Réf", "Désignation", "Catégorie", "Quantité", "Prix Unitaire HT", "Unité"]].dropna(subset=["Désignation"])
+        return df_inv[["Réf", "Désignation", "Catégorie", "Quantité", "Prix Unitaire HT", "Unité"]].dropna(subset=["Désignation"])
     else:
-        df_stock = pd.DataFrame([
+        return pd.DataFrame([
             {"Réf": "VIS-3x10", "Désignation": "VIS 3x10 BZ", "Catégorie": "Quincaillerie", "Quantité": 150, "Prix Unitaire HT": 0.05, "Unité": "U"},
             {"Réf": "PAN-MDF-18", "Désignation": "Panneau MDF 18mm 2800x2070", "Catégorie": "Panneaux & Bois", "Quantité": 12, "Prix Unitaire HT": 42.50, "Unité": "m2"}
         ])
 
-    # Chargement des chantiers depuis l'export Kimai
-    if os.path.exists("kimai-projects_20260920152909.xlsx"):
-        df_p = pd.read_excel("kimai-projects_20260920152909.xlsx")
-        df_p = df_p.dropna(subset=["Nom"])
-        liste_projets = df_p["Nom"].astype(str).tolist()
-    else:
-        liste_projets = ["26/221 Fabrication et pose d'étagères", "26/227 Réfection plan de travail"]
+DF_KIMAI_HISTO, LISTE_CHANTIERS, LISTE_TACHES = charger_donnees_kimai()
+DF_STOCK_BASE = charger_stock()
 
-    return df_stock, liste_projets
-
-df_stock_base, LISTE_CHANTIERS = charger_donnees()
-
-LISTE_TACHES = [
-    "M1 - Montage atelier", 
-    "D2 - Débit bois", 
-    "P1 - Pose chantier", 
-    "X5 - Bureau / Administration",
-    "X8 - Devis & Métrés"
-]
-
-# Initialisation de la mémoire de session Streamlit
+# Initialisation des états en session
 if 'historique_heures' not in st.session_state:
     st.session_state['historique_heures'] = []
 
 if 'stock_actuel' not in st.session_state:
-    st.session_state['stock_actuel'] = df_stock_base.copy()
+    st.session_state['stock_actuel'] = DF_STOCK_BASE.copy()
 
 if 'mouvements_stock' not in st.session_state:
     st.session_state['mouvements_stock'] = []
 
 # ---------------------------------------------------------
-# GENERATION PDF ETIQUETTES AVERY (63.5 mm x 38.1 mm - 21/page)
+# GENERATION PDF ETIQUETTES AVERY (63.5 mm x 38.1 mm)
 # ---------------------------------------------------------
 def generer_pdf_etiquettes(df_a_imprimer):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     page_height = 297 * mm
     
-    # Dimensions exactes Avery 21 étiquettes/page (63.5 mm x 38.1 mm)
     w_label = 63.5 * mm
     h_label = 38.1 * mm
+    margin_x = 7.2 * mm
+    margin_y = 11.1 * mm
+    gap_x = 2.5 * mm
+    gap_y = 1.167 * mm
     
-    # Réglage des marges et répartition de la différence sur les 6 intervalles horizontaux
-    margin_x = 7.2 * mm       # Marge gauche standard
-    margin_y = 11.1 * mm      # Marge haute théorique (donne 15 mm réels)
-    gap_x = 2.5 * mm          # Espace horizontal entre colonnes
-    gap_y = 1.167 * mm        # Espace vertical rajouté (7 mm / 6 intervalles)
-    
-    cols = 3
-    rows = 7
-    
-    col_idx = 0
-    row_idx = 0
+    cols, rows = 3, 7
+    col_idx, row_idx = 0, 0
     
     for _, row in df_a_imprimer.iterrows():
         ref = str(row['Réf'])
         designation = str(row['Désignation'])
         
-        # Position du coin inférieur gauche de l'étiquette avec l'interligne compensé
         x = margin_x + col_idx * (w_label + gap_x)
         y = page_height - margin_y - (row_idx + 1) * h_label - row_idx * gap_y
         
-        # Contour léger de repère
         c.setStrokeColorRGB(0.85, 0.85, 0.85)
         c.setLineWidth(0.2)
         c.rect(x, y, w_label, h_label)
         
-        # Génération du QR Code
         qr = qrcode.QRCode(box_size=2, border=1)
         qr.add_data(ref)
         qr.make(fit=True)
         img_qr = qr.make_image(fill_color="black", back_color="white").get_image()
         qr_image_reader = ImageReader(img_qr)
         
-        # 1. QR Code centré en haut de l'étiquette
         qr_size = 21 * mm
         qr_x = x + (w_label - qr_size) / 2
         qr_y = y + h_label - qr_size - 2.0 * mm
         c.drawImage(qr_image_reader, qr_x, qr_y, width=qr_size, height=qr_size)
         
-        # 2. Référence sous le QR Code
         c.setFillColorRGB(0, 0, 0)
         c.setFont("Helvetica-Bold", 8)
         text_y_ref = qr_y - 3.5 * mm
         c.drawCentredString(x + w_label / 2, text_y_ref, ref)
         
-        # 3. Désignation sous la référence
         if designation and designation != ref:
             c.setFont("Helvetica", 6.5)
             text_y_des = text_y_ref - 3.5 * mm
             c.drawCentredString(x + w_label / 2, text_y_des, designation[:35])
         
-        # Navigation dans la grille 3x7
         col_idx += 1
         if col_idx >= cols:
             col_idx = 0
@@ -156,14 +189,14 @@ def generer_pdf_etiquettes(df_a_imprimer):
     return buffer
 
 # ---------------------------------------------------------
-# MENU DE NAVIGATION PRINCIPAL
+# MENU DE NAVIGATION
 # ---------------------------------------------------------
 st.sidebar.title("🛠️ Gestion Menuiserie")
 menu = st.sidebar.radio(
     "Accéder aux modules :",
     [
         "⏱️ Saisie des Heures",
-        "📊 Suivi Temps & Production",
+        "📊 Suivi Temps & Historique Kimai",
         "🧮 Brouillon Devis & Marges",
         "📦 Stock & Mouvements",
         "📷 Scan QR Code Stock",
@@ -172,7 +205,7 @@ menu = st.sidebar.radio(
 )
 
 # ---------------------------------------------------------
-# 1. SAISIE DES HEURES ATELIER & CHANTIER
+# 1. SAISIE DES HEURES
 # ---------------------------------------------------------
 if menu == "⏱️ Saisie des Heures":
     st.header("⏱️ Saisie Rapide des Heures Atelier & Chantier")
@@ -181,15 +214,15 @@ if menu == "⏱️ Saisie des Heures":
         col1, col2 = st.columns(2)
         with col1:
             date_saisie = st.date_input("Date d'intervention", datetime.now())
-            chantier = st.selectbox("Chantier / Projet Kimai", LISTE_CHANTIERS)
+            chantier = st.selectbox("Chantier / Projet (issu de Kimai)", LISTE_CHANTIERS)
         with col2:
-            code_tache = st.selectbox("Tâche / Code Activité", LISTE_TACHES)
+            code_tache = st.selectbox("Tâche / Activité", LISTE_TACHES)
             heures = st.number_input("Nombre d'heures effectuées", min_value=0.25, max_value=12.0, step=0.25, value=1.0)
             
         valider = st.form_submit_button("💾 Enregistrer l'intervention")
         
         if valider:
-            est_prod = not code_tache.startswith("X")
+            est_prod = not (code_tache.startswith("X") or "BUREAU" in code_tache.upper())
             st.session_state['historique_heures'].append({
                 "Date": str(date_saisie),
                 "Chantier": chantier,
@@ -199,37 +232,45 @@ if menu == "⏱️ Saisie des Heures":
             })
             st.success(f"Enregistré : {heures}h sur **{chantier}** ({code_tache})")
 
-    st.subheader("📋 Dernières saisies de la session")
+    st.subheader("📋 Saisies de la session en cours")
     if st.session_state['historique_heures']:
         st.dataframe(pd.DataFrame(st.session_state['historique_heures']), use_container_width=True)
     else:
         st.info("Aucune saisie effectuée au cours de la session active.")
 
 # ---------------------------------------------------------
-# 2. SUIVI TEMPS & PRODUCTION
+# 2. SUIVI TEMPS & HISTORIQUE KIMAI (2025-2026)
 # ---------------------------------------------------------
-elif menu == "📊 Suivi Temps & Production":
-    st.header("📊 Suivi du Temps de Production")
+elif menu == "📊 Suivi Temps & Historique Kimai":
+    st.header("📊 Historique Kimai Cumulé (2025 - 2026)")
     
-    OBJECTIF_HEBDO = 33.50
-    
-    if st.session_state['historique_heures']:
-        df_h = pd.DataFrame(st.session_state['historique_heures'])
-        total_prod = df_h[df_h["Production"] == True]["Heures"].sum()
-        total_hors_prod = df_h[df_h["Production"] == False]["Heures"].sum()
-        total_general = total_prod + total_hors_prod
+    if not DF_KIMAI_HISTO.empty:
+        total_prod = DF_KIMAI_HISTO[DF_KIMAI_HISTO["Production"] == True]["Heures"].sum()
+        total_hors_prod = DF_KIMAI_HISTO[DF_KIMAI_HISTO["Production"] == False]["Heures"].sum()
+        total_global = total_prod + total_hors_prod
         
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Heures de Production", f"{total_prod:.2f} h", delta=f"{total_prod - OBJECTIF_HEBDO:.2f} h par rapport à l'objectif")
-        c2.metric("Heures Admin / Hors-Prod", f"{total_hors_prod:.2f} h")
-        c3.metric("Total Général", f"{total_general:.2f} h")
+        col_k1, col_k2, col_k3 = st.columns(3)
+        col_k1.metric("Total Heures Production (2 ans)", f"{total_prod:,.2f} h")
+        col_k2.metric("Total Heures Hors-Prod / Bureau", f"{total_hors_prod:,.2f} h")
+        col_k3.metric("Volume Total Enregistré Kimai", f"{total_global:,.2f} h")
         
         st.markdown("---")
-        st.subheader("Détail cumulé par chantier et activité")
-        df_recap = df_h.groupby(["Chantier", "Code", "Production"])["Heures"].sum().reset_index()
-        st.dataframe(df_recap, use_container_width=True)
+        
+        st.subheader("🔍 Recherche & Filtrage par Projet")
+        projet_selectionne = st.selectbox("Sélectionner un projet Kimai :", ["Tous les projets"] + LISTE_CHANTIERS)
+        
+        if projet_selectionne != "Tous les projets":
+            df_filtre = DF_KIMAI_HISTO[DF_KIMAI_HISTO["Projet"] == projet_selectionne]
+        else:
+            df_filtre = DF_KIMAI_HISTO
+            
+        st.dataframe(df_filtre[["Projet", "Tâche", "Heures", "Production"]], use_container_width=True)
+        
+        st.subheader("📈 Répartition par Tâche / Activité")
+        df_recap_taches = df_filtre.groupby("Tâche")["Heures"].sum().reset_index().sort_values(by="Heures", ascending=False)
+        st.bar_chart(df_recap_taches.set_index("Tâche"))
     else:
-        st.info("Saisissez des heures dans le module dédié pour afficher l'analyse temps.")
+        st.warning("Aucun fichier d'export Kimai trouvé à la racine du projet.")
 
 # ---------------------------------------------------------
 # 3. BROUILLON DEVIS & MARGES
@@ -237,7 +278,7 @@ elif menu == "📊 Suivi Temps & Production":
 elif menu == "🧮 Brouillon Devis & Marges":
     st.header("🧮 Brouillon de Devis et Calcul de Marge")
     
-    st.subheader("1. Fournitures & Matériaux (Panneaux, Quincaillerie, Sous-traitance)")
+    st.subheader("1. Fournitures & Matériaux")
     col_mat1, col_mat2 = st.columns(2)
     achats_mat = col_mat1.number_input("Total Achats Matériaux HT (€)", min_value=0.0, value=500.0, step=50.0)
     ventes_mat = col_mat2.number_input("Total Facturé Matériaux HT (€)", min_value=0.0, value=750.0, step=50.0)
@@ -264,7 +305,7 @@ elif menu == "🧮 Brouillon Devis & Marges":
     col_res2.metric("Montant Total estimé Devis HT", f"{total_devis:,.2f} €")
 
 # ---------------------------------------------------------
-# 4. GESTION DU STOCK & MOUVEMENTS
+# 4. STOCK & MOUVEMENTS
 # ---------------------------------------------------------
 elif menu == "📦 Stock & Mouvements":
     st.header("📦 Consultation et Gestion du Stock")
@@ -305,27 +346,20 @@ elif menu == "📦 Stock & Mouvements":
                 st.rerun()
 
 # ---------------------------------------------------------
-# 5. SCANNER QR CODE STOCK (Décodage via zxing-cpp)
+# 5. SCAN QR CODE STOCK
 # ---------------------------------------------------------
 elif menu == "📷 Scan QR Code Stock":
-    st.header("📷 Numérisation d'Étiquettes Quincaillerie / Stock")
-    st.write("Utilisez la caméra de votre smartphone ou tablette pour scanner une étiquette d'article.")
-    
+    st.header("📷 Numérisation d'Étiquettes Stock")
     img_captured = st.camera_input("Prendre en photo l'étiquette QR Code")
     
     if img_captured:
-        # Charger l'image capturée avec PIL
         img = Image.open(img_captured)
-        
-        # Décodage du QR code avec zxingcpp
         results = zxingcpp.read_barcodes(img)
         
         if results:
-            # Récupération du texte contenu dans le premier QR code détecté
             qr_data = results[0].text.strip()
             st.success(f"✅ **QR Code détecté :** `{qr_data}`")
             
-            # Recherche de l'article dans le stock
             df_stock = st.session_state['stock_actuel']
             article = df_stock[df_stock["Réf"] == qr_data]
             
@@ -336,9 +370,7 @@ elif menu == "📷 Scan QR Code Stock":
                 st.write(f"* **Stock actuel :** {art_info['Quantité']} {art_info['Unité']}")
                 st.write(f"* **Prix unitaire HT :** {art_info['Prix Unitaire HT']} €")
                 
-                # Action rapide sur le stock
                 st.markdown("---")
-                st.subheader("Action rapide de stock")
                 c_act1, c_act2 = st.columns(2)
                 qte_retrait = c_act1.number_input("Quantité à retirer / ajouter", min_value=1.0, value=1.0, step=1.0)
                 
@@ -356,15 +388,13 @@ elif menu == "📷 Scan QR Code Stock":
             else:
                 st.warning(f"La référence `{qr_data}` a été lue mais elle n'existe pas dans le stock actuel.")
         else:
-            st.error("❌ Aucun QR Code n'a pu être lu sur cette photo. Essayez de vous rapprocher ou d'améliorer l'éclairage.")
+            st.error("❌ Aucun QR Code n'a pu être lu sur cette photo.")
 
 # ---------------------------------------------------------
 # 6. IMPRESSION ÉTIQUETTES STOCK
 # ---------------------------------------------------------
 elif menu == "🏷️ Impression Étiquettes Stock":
-    st.header("🏷️ Impression d'Étiquettes QR Code pour Quincaillerie & Panneaux")
-    st.write("Format paramétré : **Avery 63,5 mm × 38,1 mm** (21 étiquettes par planche A4 - 3 colonnes × 7 lignes)")
-    
+    st.header("🏷️ Impression d'Étiquettes QR Code")
     filtre_imp = st.selectbox("Catégorie à afficher :", ["Toutes", "Quincaillerie", "Panneaux & Bois"])
     df_imp_base = st.session_state['stock_actuel']
     if filtre_imp != "Toutes":
