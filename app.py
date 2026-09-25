@@ -66,62 +66,83 @@ def charger_activites_souche():
 @st.cache_data
 def charger_donnees_kimai_heures(fichier_uploade=None):
   fichiers_kimai = []
-
   if fichier_uploade is not None:
     fichiers_kimai = [fichier_uploade]
   else:
     fichiers_kimai = list(
-        set(glob.glob("kimai-export*.xlsx") + glob.glob("*export*.xlsx"))
+        set(
+            glob.glob("kimai-export*.xlsx")
+            + glob.glob("*export*.xlsx")
+            + glob.glob("*.xlsx")
+        )
     )
 
   donnees_cumulees = []
 
-  # Préfixes des chantiers
-  prefixes_chantiers = ("OE ", "20/", "24/", "25/", "26/", "Agencement")
+  def convertir_en_heures(valeur):
+    """Convertit n'importe quel format (décimal, chaîne, hh:mm:ss) en heures décimales."""
+    if pd.isna(valeur):
+      return 0.0
+    val_str = str(valeur).strip().replace(",", ".")
+    # Cas format HH:MM ou HH:MM:SS
+    if ":" in val_str:
+      parties = val_str.split(":")
+      try:
+        if len(parties) == 3:
+          return (
+              float(parties[0])
+              + float(parties[1]) / 60.0
+              + float(parties[2]) / 3600.0
+          )
+        elif len(parties) == 2:
+          return float(parties[0]) + float(parties[1]) / 60.0
+      except Exception:
+        return 0.0
+    try:
+      return float(val_str)
+    except ValueError:
+      return 0.0
+
+  def est_ligne_chantier(texte):
+    """Détecte les chantiers (ex: OE 25/..., OE25/..., 25/..., 26/..., Agencement...)."""
+    t = str(texte).strip()
+    if re.match(r"^(OE\s*\d{2}/|\d{2}/\d+|Agencement)", t, re.IGNORECASE):
+      return True
+    return False
 
   for fichier in fichiers_kimai:
     try:
-      df = pd.read_excel(fichier)
-      col_nom, col_total = df.columns[0], df.columns[1]
-      projet_actuel = "Général"
-      nb_lignes = len(df)
-
-      for idx, row in df.iterrows():
-        val = str(row[col_nom]).strip()
-
-        # Nettoyage des heures
-        try:
-          total_heures = float(str(row[col_total]).replace(",", "."))
-        except (ValueError, TypeError):
-          total_heures = 0.0
-
-        if val == "nan" or not val or val == "Totale":
+      # Chargement de toutes les feuilles éventuelles
+      excel_file = pd.ExcelFile(fichier)
+      for nom_feuille in excel_file.sheet_names:
+        df = pd.read_excel(excel_file, sheet_name=nom_feuille)
+        if df.empty or len(df.columns) < 2:
           continue
 
-        # 1. Détection si c'est un chantier
-        if val.startswith(prefixes_chantiers):
-          projet_actuel = val
-          continue
+        col_nom = df.columns[0]
+        col_total = df.columns[1]
+        projet_actuel = "Général"
 
-        # 2. Détection si c'est une ligne Client (la ligne suivante est un chantier)
-        est_client = False
-        if idx + 1 < nb_lignes:
-          suivante = str(df.iloc[idx + 1, 0]).strip()
-          if suivante.startswith(prefixes_chantiers):
-            est_client = True
+        for idx, row in df.iterrows():
+          val = str(row[col_nom]).strip()
+          total_heures = convertir_en_heures(row[col_total])
 
-        if est_client:
-          continue  # On ignore le sous-total client
+          if val == "nan" or not val or val.lower() == "total":
+            continue
 
-        # 3. C'est une vraie tâche avec des heures
-        if total_heures > 0:
-          donnees_cumulees.append({
-              "Projet": projet_actuel,
-              "Tâche": val.replace("\t", " - ").strip(),
-              "Heures": total_heures,
-          })
-    except Exception as e:
-      st.error(f"Erreur lors de la lecture du fichier : {e}")
+          # Si la ligne est un en-tête de chantier
+          if est_ligne_chantier(val):
+            # Harmonisation de l'espace (ex: "OE25/237" -> "OE 25/237")
+            projet_actuel = re.sub(r"^(OE)(\d)", r"\1 \2", val)
+          elif total_heures > 0:
+            # Ne pas enregistrer comme tâche si c'est un nom client sans code tâche
+            donnees_cumulees.append({
+                "Projet": projet_actuel,
+                "Tâche": val.replace("\t", " - ").strip(),
+                "Heures": total_heures,
+            })
+    except Exception:
+      pass
 
   df_kimai = pd.DataFrame(donnees_cumulees)
 
@@ -130,13 +151,21 @@ def charger_donnees_kimai_heures(fichier_uploade=None):
     def est_production(tache):
       t = str(tache).upper()
       return not (
-          t.startswith("X") or "BUREAU" in t or "DEVIS" in t or "RDV" in t
+          t.startswith("X")
+          or "BUREAU" in t
+          or "DEVIS" in t
+          or "RDV" in t
+          or "ETUDE" in t
       )
 
     df_kimai["Production"] = df_kimai["Tâche"].apply(est_production)
     projets_uniques = sorted(df_kimai["Projet"].unique().tolist())
   else:
-    projets_uniques = []
+    projets_uniques = [
+        "OE 26/10 fabrication meuble enceinte",
+        "26/221 Fabrication et pose d'étagères",
+        "26/227 Réfection plan de travail",
+    ]
 
   return df_kimai, projets_uniques
 @st.cache_data
