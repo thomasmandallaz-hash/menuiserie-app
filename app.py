@@ -68,45 +68,48 @@ def charger_donnees_kimai_heures():
     fichiers_kimai = list(set(glob.glob("kimai-export*.xlsx") + glob.glob("*export*.xlsx")))
     donnees_cumulees = []
     
-    # Charger la liste des tâches officielles pour valider ce qui est une vraie tâche
-    taches_valides = charger_activites_souche()
-    
     for fichier in fichiers_kimai:
         if os.path.exists(fichier) and "activit" not in fichier.lower():
             try:
                 df = pd.read_excel(fichier)
                 col_nom, col_total = df.columns[0], df.columns[1]
                 projet_actuel = "Général"
+                
                 for idx, row in df.iterrows():
                     val = str(row[col_nom]).strip()
                     try:
                         total_heures = float(str(row[col_total]).replace(',', '.'))
                     except ValueError:
                         total_heures = 0.0
+                    
                     if val == "nan" or not val:
                         continue
                     
-                    # Si la ligne est un projet/client Kimai (ne commence pas par un code tâche type C1, D2, T1, etc.)
-                    # Ou si la valeur correspond à un identifiant de projet
-                    est_tache_connue = any(val.startswith(t.split(' - ')[0]) for t in taches_valides if ' - ' in t)
-                    
-                    if not est_tache_connue and (total_heures == 0 or any(val.startswith(p) for p in ["OE ", "25/", "26/", "Agencement"]) or not val[0].isdigit()):
+                    # Détection du projet (selon tes préfixes habituels)
+                    if any(val.startswith(p) for p in ["OE ", "25/", "26/", "Agencement"]):
                         projet_actuel = val
                     else:
-                        donnees_cumulees.append({
-                            "Projet": projet_actuel,
-                            "Tâche": val.replace('\t', ' - ').strip(),
-                            "Heures": total_heures
-                        })
+                        # On prend TOUTES les lignes qui ont des heures > 0
+                        if total_heures > 0:
+                            donnees_cumulees.append({
+                                "Projet": projet_actuel,
+                                "Tâche": val.replace('\t', ' - ').strip(),
+                                "Heures": total_heures
+                            })
             except Exception:
                 pass
 
     df_kimai = pd.DataFrame(donnees_cumulees)
-    def est_production(tache):
-        t = str(tache).upper()
-        return not (t.startswith("X") or "BUREAU" in t or "DEVIS" in t or "RDV" in t)
-
+    
+    # Sécurisation : si un nom de tâche est exactement un nom de projet/client parasite, on le nettoie
     if not df_kimai.empty:
+        # On supprime uniquement les lignes où le nom de la tâche est un doublon exact du nom du chantier
+        df_kimai = df_kimai[df_kimai["Tâche"] != df_kimai["Projet"]]
+        
+        def est_production(tache):
+            t = str(tache).upper()
+            return not (t.startswith("X") or "BUREAU" in t or "DEVIS" in t or "RDV" in t)
+
         df_kimai["Production"] = df_kimai["Tâche"].apply(est_production)
         projets_uniques = sorted(df_kimai["Projet"].unique().tolist())
     else:
