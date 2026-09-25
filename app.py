@@ -27,79 +27,32 @@ st.set_page_config(
 # ---------------------------------------------------------
 ACTIVITES_INTEGRALES = [
     # Débit (D1 - D7)
-    "D1 - Appro Débit",
-    "D2 - Débit massif",
-    "D3 - Scie à ruban",
-    "D4 - Scie à format",
-    "D5 - Scie à Panneaux",
-    "D6 - Scie à ruban métaux",
-    "D7 - Scie radiale",
+    "D1 - Appro Débit", "D2 - Débit massif", "D3 - Scie à ruban", "D4 - Scie à format",
+    "D5 - Scie à Panneaux", "D6 - Scie à ruban métaux", "D7 - Scie radiale",
     # Corroyage (C1 - C3)
-    "C1 - Corroyeuse 4 faces",
-    "C2 - Dégauchissage",
-    "C3 - Rabotage",
+    "C1 - Corroyeuse 4 faces", "C2 - Dégauchissage", "C3 - Rabotage",
     # Usinage (U1 - U11)
-    "U1 - Toupie",
-    "U2 - Défonceuses",
-    "U3 - Scie à ruban",
-    "U4 - Plaqueuse",
-    "U5 - CN (Commande Numérique)",
-    "U6 - Tournage",
-    "U7 - Mortaisage",
-    "U8 - Tenonnage",
-    "U9 - Pointage machine",
-    "U10 - Usinage",
-    "U11 - Perçage manuel",
+    "U1 - Toupie", "U2 - Défonceuses", "U3 - Scie à ruban", "U4 - Plaqueuse",
+    "U5 - CN (Commande Numérique)", "U6 - Tournage", "U7 - Mortaisage",
+    "U8 - Tenonnage", "U9 - Pointage machine", "U10 - Usinage", "U11 - Perçage manuel",
     # Finition / Ponçage (B1 - B7)
-    "B1 - Finition manuelle",
-    "B2 - Ponceuse à bande",
-    "B3 - Placage chant main",
-    "B4 - Affleurage chants",
-    "B5 - Vitrage",
-    "B6 - Cassage d'arêtes",
-    "B7 - Brossage",
+    "B1 - Finition manuelle", "B2 - Ponceuse à bande", "B3 - Placage chant main",
+    "B4 - Affleurage chants", "B5 - Vitrage", "B6 - Cassage d'arêtes", "B7 - Brossage",
     # Montage (M1 - M4)
-    "M1 - Montage (cadrage)",
-    "M2 - Montage caisses",
-    "M3 - Collage Px",
-    "M4 - Collage néoprène",
+    "M1 - Montage (cadrage)", "M2 - Montage caisses", "M3 - Collage Px", "M4 - Collage néoprène",
     # Etudes / Devis / Bureau (X1 - X9)
-    "X1 - Étude de plan",
-    "X2 - Établissement",
-    "X3 - Traçage",
-    "X4 - Affûtage",
-    "X5 - Bureau",
-    "X6 - RDV Clientèle",
-    "X7 - Relevé de cotes",
-    "X8 - Mise en page devis",
-    "X9 - Création publication réseau",
+    "X1 - Étude de plan", "X2 - Établissement", "X3 - Traçage", "X4 - Affûtage",
+    "X5 - Bureau", "X6 - RDV Clientèle", "X7 - Relevé de cotes", "X8 - Mise en page devis", "X9 - Création publication réseau",
     # Vernissage / Peinture (V1 - V6)
-    "V1 - Vernissage pistolet",
-    "V2 - Laquage pistolet",
-    "V3 - Pinceau",
-    "V4 - Teinture",
-    "V5 - Égrenage",
-    "V6 - Traitement IFH",
+    "V1 - Vernissage pistolet", "V2 - Laquage pistolet", "V3 - Pinceau", "V4 - Teinture", "V5 - Égrenage", "V6 - Traitement IFH",
     # Quincaillerie (Q1)
     "Q1 - Pose quincaillerie",
     # Nettoyage / Atelier (N1 - N5)
-    "N1 - Nettoyage atelier",
-    "N2 - Rangement atelier",
-    "N3 - Affûtage atelier",
-    "N4 - Changement sac aspi",
-    "N5 - Changement plaquettes",
+    "N1 - Nettoyage atelier", "N2 - Rangement atelier", "N3 - Affûtage atelier", "N4 - Changement sac aspi", "N5 - Changement plaquettes",
     # Transport / Manutention (T1 - T5)
-    "T1 - Trajet",
-    "T2 - Chargement",
-    "T3 - Mise au séchoir",
-    "T4 - Emballage",
-    "T5 - Manutention",
+    "T1 - Trajet", "T2 - Chargement", "T3 - Mise au séchoir", "T4 - Emballage", "T5 - Manutention",
     # Pose / Chantier (P1 - P5)
-    "P1 - Pose sur chantier",
-    "P2 - Démontage",
-    "P3 - Évacuation",
-    "P4 - Fab gabarits",
-    "P5 - Rangement nettoyage chantier"
+    "P1 - Pose sur chantier", "P2 - Démontage", "P3 - Évacuation", "P4 - Fab gabarits", "P5 - Rangement nettoyage chantier"
 ]
 
 @st.cache_data
@@ -109,18 +62,15 @@ def charger_activites_souche():
     
     if os.path.exists(fichier_souche):
         try:
-            # Lecture de toutes les feuilles ou de la feuille 'Réf'
             xls = pd.ExcelFile(fichier_souche)
             sheet = "Réf" if "Réf" in xls.sheet_names else xls.sheet_names[0]
             df_act = pd.read_excel(xls, sheet_name=sheet)
             
-            # Parcours de toutes les paires de colonnes pour extraire (Code + Intitulé)
             for idx, row in df_act.iterrows():
                 vals = [str(val).strip() for val in row.values if pd.notna(val) and str(val).strip() != "nan"]
                 for i in range(len(vals) - 1):
                     code = vals[i]
                     intitule = vals[i+1]
-                    # Détection d'un code activité (ex: D1, U10, P5...)
                     if len(code) <= 4 and code[0].isalpha() and code[1:].isdigit():
                         elem = f"{code} - {intitule}"
                         if elem not in taches_extraites:
@@ -128,15 +78,11 @@ def charger_activites_souche():
         except Exception:
             pass
 
-    # Si la lecture automatique extrait moins de 30 activités, on bascule sur la liste intégrale des 62
     if len(taches_extraites) < 30:
         return ACTIVITES_INTEGRALES.copy()
         
     return taches_extraites
 
-# ---------------------------------------------------------
-# CHARGEMENT DES EXPORTS HEURES ET DU STOCK
-# ---------------------------------------------------------
 @st.cache_data
 def charger_donnees_kimai_heures():
     fichiers_kimai = glob.glob("kimai-export*.xlsx") + glob.glob("*export*.xlsx")
@@ -190,7 +136,7 @@ def charger_donnees_kimai_heures():
         df_kimai["Production"] = df_kimai["Tâche"].apply(est_production)
         projets_uniques = sorted(df_kimai["Projet"].unique().tolist())
     else:
-        projets_uniques = ["26/221 Fabrication et pose d'étagères", "26/227 Réfection plan de travail"]
+        projets_uniques = ["OE 26/10 fabrication meuble enceinte", "26/221 Fabrication et pose d'étagères", "26/227 Réfection plan de travail"]
 
     return df_kimai, projets_uniques
 
@@ -242,6 +188,9 @@ if 'stock_actuel' not in st.session_state:
 
 if 'mouvements_stock' not in st.session_state:
     st.session_state['mouvements_stock'] = []
+
+if 'achats_projets' not in st.session_state:
+    st.session_state['achats_projets'] = {}
 
 # ---------------------------------------------------------
 # GENERATION PDF ETIQUETTES AVERY (33.5 mm x 38.1 mm)
@@ -313,7 +262,7 @@ menu = st.sidebar.radio(
     "Accéder aux modules :",
     [
         "⏱️ Saisie des Heures",
-        "📊 Suivi Temps & Historique Kimai",
+        "📊 Suivi Temps & Bilan Rentabilité",
         "🧮 Brouillon Devis & Marges",
         "📦 Stock & Mouvements",
         "📷 Scan QR Code Stock",
@@ -322,7 +271,7 @@ menu = st.sidebar.radio(
 )
 
 # ---------------------------------------------------------
-# 1. SAISIE DES HEURES + AJOUT MANUEL DE TÂCHE
+# 1. SAISIE DES HEURES
 # ---------------------------------------------------------
 if menu == "⏱️ Saisie des Heures":
     st.header("⏱️ Saisie Rapide des Heures Atelier & Chantier")
@@ -374,38 +323,113 @@ if menu == "⏱️ Saisie des Heures":
         st.info("Aucune saisie effectuée au cours de la session active.")
 
 # ---------------------------------------------------------
-# 2. SUIVI TEMPS & HISTORIQUE KIMAI
+# 2. SUIVI TEMPS & BILAN RENTABILITE PAR CHANTIER
 # ---------------------------------------------------------
-elif menu == "📊 Suivi Temps & Historique Kimai":
-    st.header("📊 Historique Kimai Cumulé")
+elif menu == "📊 Suivi Temps & Bilan Rentabilité":
+    st.header("📊 Suivi du Temps & Bilan de Rentabilité par Chantier")
     
-    if not DF_KIMAI_HISTO.empty:
-        total_prod = DF_KIMAI_HISTO[DF_KIMAI_HISTO["Production"] == True]["Heures"].sum()
-        total_hors_prod = DF_KIMAI_HISTO[DF_KIMAI_HISTO["Production"] == False]["Heures"].sum()
-        total_global = total_prod + total_hors_prod
-        
-        col_k1, col_k2, col_k3 = st.columns(3)
-        col_k1.metric("Total Heures Production", f"{total_prod:,.2f} h")
-        col_k2.metric("Total Heures Hors-Prod / Bureau", f"{total_hors_prod:,.2f} h")
-        col_k3.metric("Volume Total Enregistré Kimai", f"{total_global:,.2f} h")
-        
-        st.markdown("---")
-        
-        st.subheader("🔍 Recherche & Filtrage par Projet")
-        projet_selectionne = st.selectbox("Sélectionner un projet Kimai :", ["Tous les projets"] + LISTE_CHANTIERS)
-        
-        if projet_selectionne != "Tous les projets":
-            df_filtre = DF_KIMAI_HISTO[DF_KIMAI_HISTO["Projet"] == projet_selectionne]
+    # Fusion des données historiques Kimai et des saisies de la session
+    df_global = DF_KIMAI_HISTO.copy()
+    if st.session_state['historique_heures']:
+        df_sess = pd.DataFrame(st.session_state['historique_heures'])
+        df_sess.rename(columns={"Chantier": "Projet", "Code": "Tâche"}, inplace=True)
+        df_global = pd.concat([df_global, df_sess[["Projet", "Tâche", "Heures", "Production"]]], ignore_index=True)
+
+    # Choix du projet
+    projet_sel = st.selectbox("🎯 Choisissez le chantier à analyser :", LISTE_CHANTIERS)
+    
+    st.markdown(f"## 📁 Chantier : `{projet_sel}`")
+    
+    df_proj = df_global[df_global["Projet"] == projet_sel]
+    
+    # 1. VISIONS DES HEURES
+    col_h1, col_h2, col_h3 = st.columns(3)
+    
+    total_h = df_proj["Heures"].sum() if not df_proj.empty else 0.0
+    h_prod = df_proj[df_proj["Production"] == True]["Heures"].sum() if not df_proj.empty else 0.0
+    h_bureau = df_proj[df_proj["Production"] == False]["Heures"].sum() if not df_proj.empty else 0.0
+    
+    col_h1.metric("⏱️ Total Heures Passées", f"{total_h:,.2f} h")
+    col_h2.metric("🔨 Production / Atelier", f"{h_prod:,.2f} h")
+    col_h3.metric("✏️ Etudes / Devis / RDV", f"{h_bureau:,.2f} h")
+    
+    st.markdown("---")
+    
+    # 2. REPARTITION GRAPHIQUE DES HEURES
+    col_g1, col_g2 = st.columns(2)
+    
+    with col_g1:
+        st.subheader("📉 Temps passé par Activité")
+        if not df_proj.empty and total_h > 0:
+            df_recap = df_proj.groupby("Tâche")["Heures"].sum().reset_index().sort_values(by="Heures", ascending=False)
+            st.bar_chart(df_recap.set_index("Tâche"))
         else:
-            df_filtre = DF_KIMAI_HISTO
+            st.info("Aucune heure enregistrée sur ce chantier pour le moment.")
             
-        st.dataframe(df_filtre[["Projet", "Tâche", "Heures", "Production"]], use_container_width=True)
+    with col_g2:
+        st.subheader("🛒 Matériaux & Fournitures du Chantier")
         
-        st.subheader("📈 Répartition par Tâche / Activité")
-        df_recap_taches = df_filtre.groupby("Tâche")["Heures"].sum().reset_index().sort_values(by="Heures", ascending=False)
-        st.bar_chart(df_recap_taches.set_index("Tâche"))
+        # Initialisation du budget matériaux pour ce projet
+        if projet_sel not in st.session_state['achats_projets']:
+            st.session_state['achats_projets'][projet_sel] = {
+                "achats_ht": 450.0,
+                "ventes_ht": 650.0,
+                "heures_devises": 15.0,
+                "taux_horaire": 55.0
+            }
+            
+        donnees_proj = st.session_state['achats_projets'][projet_sel]
+        
+        with st.form(f"form_mat_{projet_sel}"):
+            mat_achats = st.number_input("Coût Achat Matériaux / Stock HT (€)", value=float(donnees_proj["achats_ht"]), step=50.0)
+            mat_ventes = st.number_input("Facturé Client Matériaux HT (€)", value=float(donnees_proj["ventes_ht"]), step=50.0)
+            h_prevues = st.number_input("Heures Devissées / Prévues (h)", value=float(donnees_proj["heures_devises"]), step=1.0)
+            th_vendu = st.number_input("Taux Horaire Vendu HT (€/h)", value=float(donnees_proj["taux_horaire"]), step=5.0)
+            
+            if st.form_submit_button("💾 Mettre à jour les données du devis"):
+                st.session_state['achats_projets'][projet_sel] = {
+                    "achats_ht": mat_achats,
+                    "ventes_ht": mat_ventes,
+                    "heures_devises": h_prevues,
+                    "taux_horaire": th_vendu
+                }
+                st.success("Données financières du chantier mises à jour !")
+                st.rerun()
+
+    # 3. SYNTHESE DE RENTABILITE DU CHANTIER
+    st.markdown("---")
+    st.subheader("💰 Synthèse de Marge & Rentabilité")
+    
+    mat_achats = st.session_state['achats_projets'][projet_sel]["achats_ht"]
+    mat_ventes = st.session_state['achats_projets'][projet_sel]["ventes_ht"]
+    h_prevues = st.session_state['achats_projets'][projet_sel]["heures_devises"]
+    th_vendu = st.session_state['achats_projets'][projet_sel]["taux_horaire"]
+    
+    marge_mat = mat_ventes - mat_achats
+    taux_marque = (marge_mat / mat_ventes * 100) if mat_ventes > 0 else 0
+    
+    ca_mo_devis = h_prevues * th_vendu
+    ca_devis_total = mat_ventes + ca_mo_devis
+    
+    ecart_heures = total_h - h_prevues
+    
+    c_r1, c_r2, c_r3, c_r4 = st.columns(4)
+    c_r1.metric("Marge Matériaux HT", f"{marge_mat:,.2f} €", f"{taux_marque:.1f}% de marque")
+    c_r2.metric("Chiffre d'Affaires Devisé", f"{ca_devis_total:,.2f} € HT")
+    c_r3.metric("Heures Devisées vs Passées", f"{total_h:.2f}h / {h_prevues:.1f}h", delta=f"{-ecart_heures:.2f}h", delta_color="normal")
+    
+    # Calcul du bénéfice brut estimé (Marge Matériaux + (Taux Horaire x Heures réelles ou valorisées))
+    valeur_mo_realisee = total_h * th_vendu
+    marge_globale_estimee = marge_mat + (ca_mo_devis - valeur_mo_realisee)
+    
+    if ecart_heures <= 0:
+        c_r4.metric("Rentabilité Temps", "Dans le budget ✅", delta=f"{abs(ecart_heures):.1f}h d'avance")
     else:
-        st.warning("Aucun fichier d'export Kimai trouvé à la racine du projet.")
+        c_r4.metric("Rentabilité Temps", "Dépassement ⚠️", delta=f"-{ecart_heures:.1f}h de dépassement", delta_color="inverse")
+
+    st.markdown("---")
+    st.subheader("📄 Détail de l'historique des heures sur ce chantier")
+    st.dataframe(df_proj[["Tâche", "Heures", "Production"]], use_container_width=True)
 
 # ---------------------------------------------------------
 # 3. BROUILLON DEVIS & MARGES
