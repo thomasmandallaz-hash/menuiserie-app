@@ -77,22 +77,22 @@ if 'mouvements_stock' not in st.session_state:
     st.session_state['mouvements_stock'] = []
 
 # ---------------------------------------------------------
-# GENERATION PDF ETIQUETTES AVERY (33.5 mm x 38.1 mm - 21/page)
+# GENERATION PDF ETIQUETTES AVERY (63.5 mm x 38.1 mm - 21/page)
 # ---------------------------------------------------------
 def generer_pdf_etiquettes(df_a_imprimer):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     page_height = 297 * mm
     
-    # Dimensions exactes de l'étiquette Avery
-    w_label = 33.5 * mm
+    # Dimensions exactes Avery 21 étiquettes/page (63.5 mm x 38.1 mm)
+    w_label = 63.5 * mm
     h_label = 38.1 * mm
     
-    # Réglage précis de la grille pour planche A4 (3 colonnes x 7 lignes)
-    margin_x = 7.0 * mm       # Marge gauche
-    margin_y = 8.5 * mm       # Marge haute exacte
-    gap_x = 3.0 * mm          # Espace horizontal entre étiquettes
-    gap_y = 2.0 * mm          # Espace vertical entre étiquettes
+    # Grille et marges standard pour Avery 3x7 sur A4
+    margin_x = 7.2 * mm       # Marge gauche
+    margin_y = 15.1 * mm      # Marge haute
+    gap_x = 2.5 * mm          # Espace horizontal
+    gap_y = 0.0 * mm          # Espace vertical
     
     cols = 3
     rows = 7
@@ -104,41 +104,41 @@ def generer_pdf_etiquettes(df_a_imprimer):
         ref = str(row['Réf'])
         designation = str(row['Désignation'])
         
-        # Position du coin inférieur gauche de l'étiquette courante
+        # Position du coin inférieur gauche de l'étiquette
         x = margin_x + col_idx * (w_label + gap_x)
         y = page_height - margin_y - (row_idx + 1) * h_label - row_idx * gap_y
         
-        # Optionnel : contour léger pour vérifier l'alignement à l'impression
-        c.setStrokeColorRGB(0.8, 0.8, 0.8)
+        # Contour très léger de repère
+        c.setStrokeColorRGB(0.85, 0.85, 0.85)
         c.setLineWidth(0.2)
         c.rect(x, y, w_label, h_label)
         
-        # Generer le QR Code
+        # Génération du QR Code
         qr = qrcode.QRCode(box_size=2, border=1)
         qr.add_data(ref)
         qr.make(fit=True)
         img_qr = qr.make_image(fill_color="black", back_color="white").get_image()
         qr_image_reader = ImageReader(img_qr)
         
-        # 1. QR Code dimensionné et centré en haut de la case
-        qr_size = 18 * mm
+        # 1. QR Code centré en haut de l'étiquette élargie
+        qr_size = 21 * mm
         qr_x = x + (w_label - qr_size) / 2
-        qr_y = y + h_label - qr_size - 1.5 * mm
+        qr_y = y + h_label - qr_size - 2.0 * mm
         c.drawImage(qr_image_reader, qr_x, qr_y, width=qr_size, height=qr_size)
         
         # 2. Référence sous le QR Code
         c.setFillColorRGB(0, 0, 0)
-        c.setFont("Helvetica-Bold", 7)
+        c.setFont("Helvetica-Bold", 8)
         text_y_ref = qr_y - 3.5 * mm
-        c.drawCentredString(x + w_label / 2, text_y_ref, ref[:16])
+        c.drawCentredString(x + w_label / 2, text_y_ref, ref)
         
         # 3. Désignation sous la référence
         if designation and designation != ref:
-            c.setFont("Helvetica", 5.5)
-            text_y_des = text_y_ref - 3.0 * mm
-            c.drawCentredString(x + w_label / 2, text_y_des, designation[:22])
+            c.setFont("Helvetica", 6.5)
+            text_y_des = text_y_ref - 3.5 * mm
+            c.drawCentredString(x + w_label / 2, text_y_des, designation[:35])
         
-        # Navigation dans la grille
+        # Navigation dans la grille 3x7
         col_idx += 1
         if col_idx >= cols:
             col_idx = 0
@@ -318,7 +318,7 @@ elif menu == "📷 Scan QR Code Stock":
 # ---------------------------------------------------------
 elif menu == "🏷️ Impression Étiquettes Stock":
     st.header("🏷️ Impression d'Étiquettes QR Code pour Quincaillerie & Panneaux")
-    st.write("Format paramétré : **Avery 33,5 mm × 38,1 mm** (21 étiquettes par planche A4 - 3 colonnes × 7 lignes)")
+    st.write("Format paramétré : **Avery 63,5 mm × 38,1 mm** (21 étiquettes par planche A4 - 3 colonnes × 7 lignes)")
     
     filtre_imp = st.selectbox("Catégorie à afficher :", ["Toutes", "Quincaillerie", "Panneaux & Bois"])
     df_imp_base = st.session_state['stock_actuel']
